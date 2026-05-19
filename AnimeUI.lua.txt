@@ -1,63 +1,36 @@
---// AnimeUI (Rayfield-style single file library)
---// GitHub loader compatible:
---// local UI = loadstring(game:HttpGet("RAW_URL"))()
+-- AnimeUI (Rayfield-style single file library, icon-only sidebar v2)
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local AnimeUI = {}
 
---//////////////////////////////////////////////////////
--- THEME
---//////////////////////////////////////////////////////
-
-AnimeUI.Themes = {
-	Sakura = {
-		Background = Color3.fromRGB(18, 18, 24),
-		Panel = Color3.fromRGB(28, 28, 36),
-		Tab = Color3.fromRGB(30, 30, 40),
-		Accent = Color3.fromRGB(170, 120, 255),
-		Accent2 = Color3.fromRGB(210, 170, 255),
-		Text = Color3.fromRGB(255, 255, 255),
-		Muted = Color3.fromRGB(160, 160, 170)
-	}
+local Theme = {
+	BG = Color3.fromRGB(18,18,24),
+	Panel = Color3.fromRGB(28,28,36),
+	Tab = Color3.fromRGB(30,30,40),
+	Accent = Color3.fromRGB(170,120,255),
+	Text = Color3.fromRGB(255,255,255)
 }
 
---//////////////////////////////////////////////////////
--- UTILS
---//////////////////////////////////////////////////////
-
-local function tween(obj, t, props)
+local function tween(obj,t,props)
 	TweenService:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
 end
 
-local function corner(obj, r)
+local function corner(obj,r)
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, r or 8)
+	c.CornerRadius = UDim.new(0,r or 10)
 	c.Parent = obj
-	return c
 end
 
-local function stroke(obj, color)
-	local s = Instance.new("UIStroke")
-	s.Color = color
-	s.Thickness = 1.5
-	s.Parent = obj
-	return s
-end
-
---//////////////////////////////////////////////////////
--- WINDOW
 --//////////////////////////////////////////////////////
 
 function AnimeUI:CreateWindow(cfg)
 	cfg = cfg or {}
-	local theme = self.Themes[cfg.Theme or "Sakura"]
 
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "AnimeUI"
@@ -65,181 +38,158 @@ function AnimeUI:CreateWindow(cfg)
 	gui.Parent = PlayerGui
 
 	local main = Instance.new("Frame")
-	main.Size = UDim2.new(0, 620, 0, 400)
-	main.Position = UDim2.new(0.5, -310, 0.5, -200)
-	main.BackgroundColor3 = theme.Background
+	main.Size = UDim2.new(0,620,0,400)
+	main.Position = UDim2.new(0.5,-310,0.5,-200)
+	main.BackgroundColor3 = Theme.BG
 	main.Parent = gui
-	main.Active = true
-	main.Draggable = true
-	corner(main, 14)
-	stroke(main, theme.Accent)
+	corner(main,14)
 
-	-- topbar
-	local topbar = Instance.new("Frame")
-	topbar.Size = UDim2.new(1, 0, 0, 40)
-	topbar.BackgroundColor3 = theme.Panel
-	topbar.Parent = main
-	corner(topbar, 14)
+	local top = Instance.new("Frame")
+	top.Size = UDim2.new(1,0,0,40)
+	top.BackgroundColor3 = Theme.Panel
+	top.Parent = main
+	corner(top,14)
 
 	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, -20, 1, 0)
-	title.Position = UDim2.new(0, 10, 0, 0)
+	title.Size = UDim2.new(1,-20,1,0)
+	title.Position = UDim2.new(0,10,0,0)
 	title.BackgroundTransparency = 1
 	title.Text = cfg.Name or "Anime UI"
-	title.TextColor3 = theme.Text
+	title.TextColor3 = Theme.Text
 	title.Font = Enum.Font.GothamBold
 	title.TextSize = 16
 	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.Parent = topbar
+	title.Parent = top
 
-	-- sidebar (ICON ONLY)
 	local sidebar = Instance.new("Frame")
-	sidebar.Size = UDim2.new(0, 60, 1, -40)
-	sidebar.Position = UDim2.new(0, 0, 0, 40)
+	sidebar.Size = UDim2.new(0,60,1,-40)
+	sidebar.Position = UDim2.new(0,0,0,40)
 	sidebar.BackgroundTransparency = 1
 	sidebar.Parent = main
 
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 10)
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.Parent = sidebar
-
-	-- content
 	local content = Instance.new("Frame")
-	content.Size = UDim2.new(1, -60, 1, -40)
-	content.Position = UDim2.new(0, 60, 0, 40)
+	content.Size = UDim2.new(1,-60,1,-40)
+	content.Position = UDim2.new(0,60,0,40)
 	content.BackgroundTransparency = 1
 	content.Parent = main
 
-	-- toggle UI (RIGHT SHIFT)
-	local visible = true
-
-	UserInputService.InputBegan:Connect(function(input, gp)
+	-- RIGHT SHIFT TOGGLE (smooth)
+	local open = true
+	UserInputService.InputBegan:Connect(function(input,gp)
 		if gp then return end
 		if input.KeyCode == Enum.KeyCode.RightShift then
-			visible = not visible
-			main.Visible = visible
+			open = not open
+
+			if open then
+				main.Visible = true
+				main.BackgroundTransparency = 1
+				tween(main,0.2,{BackgroundTransparency = 0})
+			else
+				tween(main,0.2,{BackgroundTransparency = 1})
+				task.delay(0.2,function()
+					main.Visible = false
+				end)
+			end
 		end
 	end)
 
-	-- API
 	local window = {}
 	window._tabs = {}
-	window._buttons = {}
-	window._theme = theme
-	window._gui = gui
-	window._main = main
-
-	--//////////////////////////////////////////////////////
-	-- TAB SYSTEM (ICON ONLY)
-	--//////////////////////////////////////////////////////
 
 	function window:CreateTab(name, icon)
-		local tabButton = Instance.new("ImageButton")
-		tabButton.Size = UDim2.new(0, 44, 0, 44)
-		tabButton.BackgroundColor3 = theme.Tab
-		tabButton.Image = icon or ""
-		tabButton.ImageColor3 = theme.Accent
-		tabButton.AutoButtonColor = false
-		tabButton.Parent = sidebar
-		corner(tabButton, 10)
+
+		local tabBtn = Instance.new("ImageButton")
+		tabBtn.Size = UDim2.new(0,44,0,44)
+		tabBtn.BackgroundColor3 = Theme.Tab
+		tabBtn.Image = icon or ""
+		tabBtn.ImageColor3 = Theme.Accent
+		tabBtn.Parent = sidebar
+		corner(tabBtn,10)
 
 		local page = Instance.new("ScrollingFrame")
-		page.Size = UDim2.new(1, 0, 1, 0)
+		page.Size = UDim2.new(1,0,1,0)
 		page.BackgroundTransparency = 1
 		page.Visible = false
 		page.ScrollBarThickness = 3
 		page.Parent = content
 
-		local list = Instance.new("UIListLayout")
-		list.Padding = UDim.new(0, 8)
-		list.Parent = page
+		local layout = Instance.new("UIListLayout")
+		layout.Padding = UDim.new(0,8)
+		layout.Parent = page
 
 		local padding = Instance.new("UIPadding")
-		padding.PaddingTop = UDim.new(0, 10)
-		padding.PaddingLeft = UDim.new(0, 10)
+		padding.PaddingTop = UDim.new(0,10)
+		padding.PaddingLeft = UDim.new(0,10)
 		padding.Parent = page
 
-		local tab = {}
-
 		local function setActive()
-			for _, v in pairs(content:GetChildren()) do
+			for _,v in pairs(content:GetChildren()) do
 				if v:IsA("ScrollingFrame") then
 					v.Visible = false
 				end
 			end
 			page.Visible = true
 
-			for _, b in pairs(window._buttons) do
-				b.BackgroundColor3 = theme.Tab
-				b.ImageColor3 = theme.Accent
+			for _,b in pairs(sidebar:GetChildren()) do
+				if b:IsA("ImageButton") then
+					b.BackgroundColor3 = Theme.Tab
+					b.ImageColor3 = Theme.Accent
+				end
 			end
 
-			tabButton.BackgroundColor3 = theme.Accent
-			tabButton.ImageColor3 = Color3.fromRGB(255,255,255)
+			tabBtn.BackgroundColor3 = Theme.Accent
+			tabBtn.ImageColor3 = Color3.fromRGB(255,255,255)
 		end
 
-		tabButton.MouseButton1Click:Connect(setActive)
+		tabBtn.MouseButton1Click:Connect(setActive)
 
-		tab:AddButton = function(_, cfg)
-			local btn = Instance.new("TextButton")
-			btn.Size = UDim2.new(1, -10, 0, 40)
-			btn.BackgroundColor3 = theme.Tab
-			btn.Text = cfg.Name
-			btn.TextColor3 = theme.Text
-			btn.Parent = page
-			corner(btn, 10)
+		tabBtn.MouseEnter:Connect(function()
+			tween(tabBtn,0.15,{
+				BackgroundColor3 = Theme.Accent
+			})
+		end)
 
-			btn.MouseEnter:Connect(function()
-				tween(btn, 0.15, {BackgroundColor3 = theme.Accent})
-			end)
+		tabBtn.MouseLeave:Connect(function()
+			if page.Visible == false then
+				tween(tabBtn,0.15,{
+					BackgroundColor3 = Theme.Tab
+				})
+			end
+		end)
 
-			btn.MouseLeave:Connect(function()
-				tween(btn, 0.15, {BackgroundColor3 = theme.Tab})
-			end)
+		local tab = {}
 
-			btn.MouseButton1Click:Connect(function()
+		function tab:AddButton(cfg)
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(1,-10,0,40)
+			b.BackgroundColor3 = Theme.Tab
+			b.Text = cfg.Name
+			b.TextColor3 = Theme.Text
+			b.Parent = page
+			corner(b,10)
+
+			b.MouseButton1Click:Connect(function()
 				if cfg.Callback then cfg.Callback() end
 			end)
 		end
 
-		tab:AddToggle = function(_, cfg)
+		function tab:AddToggle(cfg)
 			local state = cfg.Default or false
 
-			local holder = Instance.new("Frame")
-			holder.Size = UDim2.new(1, -10, 0, 40)
-			holder.BackgroundColor3 = theme.Tab
-			holder.Parent = page
-			corner(holder, 10)
+			local t = Instance.new("TextButton")
+			t.Size = UDim2.new(1,-10,0,40)
+			t.BackgroundColor3 = Theme.Tab
+			t.Text = cfg.Name
+			t.TextColor3 = Theme.Text
+			t.Parent = page
+			corner(t,10)
 
-			local tbtn = Instance.new("TextButton")
-			tbtn.Size = UDim2.new(0, 40, 0, 20)
-			tbtn.Position = UDim2.new(1, -50, 0.5, -10)
-			tbtn.Text = ""
-			tbtn.BackgroundColor3 = state and theme.Accent or Color3.fromRGB(80,80,80)
-			tbtn.Parent = holder
-			corner(tbtn, 10)
-
-			local label = Instance.new("TextLabel")
-			label.BackgroundTransparency = 1
-			label.Text = cfg.Name
-			label.TextColor3 = theme.Text
-			label.Size = UDim2.new(1, -60, 1, 0)
-			label.Position = UDim2.new(0, 10, 0, 0)
-			label.Parent = holder
-
-			tbtn.MouseButton1Click:Connect(function()
+			t.MouseButton1Click:Connect(function()
 				state = not state
-				tween(tbtn, 0.15, {
-					BackgroundColor3 = state and theme.Accent or Color3.fromRGB(80,80,80)
-				})
 				if cfg.Callback then cfg.Callback(state) end
 			end)
 		end
 
-		table.insert(window._buttons, tabButton)
-
-		setActive()
 		return tab
 	end
 
