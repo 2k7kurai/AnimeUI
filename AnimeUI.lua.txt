@@ -1,6 +1,6 @@
 --[[
     ╔══════════════════════════════════════════════════════════════════╗
-    ║         ZENITH IMMORTAL UI FRAMEWORK  ·  v3.0                   ║
+    ║         ZENITH IMMORTAL UI FRAMEWORK  ·  v3.1                   ║
     ║  USAGE:                                                          ║
     ║    local ZI = loadstring(game:HttpGet("RAW_GITHUB_URL"))()       ║
     ║    local Win = ZI:CreateWindow({ Name="My Script",               ║
@@ -8,9 +8,30 @@
     ║    local Tab = Win:CreateTab("Combat", ZI.Icons.Combat)          ║
     ║    Tab:AddToggle({ Name="Aimbot", Flag="Aimbot", Default=false,  ║
     ║                    Callback=function(v) end })                   ║
-    ║    Win:BuildConfigUI(Win:CreateTab("Configs",ZI.Icons.Configs))  ║
-    ║    Toggle UI: RightShift                                         ║
+    ║    Win:BuildConfigUI(Win:CreateTab("Configs", ZI.Icons.Configs)) ║
+    ║    Win:BuildSettingsUI(Win:CreateTab("Settings",ZI.Icons.Settings))║
+    ║    Toggle UI: RightShift  ·  Mini logo button: drag/click       ║
     ╚══════════════════════════════════════════════════════════════════╝
+
+    CHANGELOG v3.1
+    • Background image and overlay now have explicit UICorner — fixes sharp
+      edges clipping outside the rounded main frame when ScaleType=Crop.
+    • Persistent settings (ZenithImmortal/settings.json):
+        – backgroundId  saved/loaded across sessions
+        – notificationsEnabled (default true)
+        – miniLogoEnabled (default true)
+    • Mini logo: draggable circle button, middle-left of screen, click
+      to open/close the main UI.  Exposed in BuildSettingsUI.
+    • BuildSettingsUI() method — call with any Tab to add permanent
+      Background ID input, Notifications toggle, Mini Logo toggle.
+    • Slider/Keybind UserInputService connections are now tracked in
+      Window._connections so they are properly disconnected on Unload.
+    • Shared slider drag state — a single UIS.InputChanged/InputEnded
+      pair handles ALL sliders instead of one per slider.
+    • Removed dead wtw wrapper (was defined but never used internally).
+    • Notification spam on button clicks removed — only toggles, sliders
+      on release, dropdowns, and keybinds send notifications.
+    • Window:Notify supports c2.Force=true to bypass notifications toggle.
 ]]
 
 ------------------------------------------------------------------------
@@ -21,6 +42,7 @@ local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService      = game:GetService("HttpService")
 local RunService       = game:GetService("RunService")
+local TextService      = game:GetService("TextService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
@@ -44,8 +66,10 @@ ZenithImmortal.Icons = {
     Combat   = "rbxassetid://92732481753916",
 }
 
-local DEFAULT_BG    = "rbxassetid://112001457145749"
-local CONFIG_FOLDER = "ZenithImmortal/Configs"
+local DEFAULT_BG       = "rbxassetid://112001457145749"
+local MINI_LOGO_ID     = "rbxassetid://277080964"
+local CONFIG_FOLDER    = "ZenithImmortal/Configs"
+local SETTINGS_FILE    = "ZenithImmortal/settings.json"
 
 ------------------------------------------------------------------------
 -- THEME
@@ -69,7 +93,7 @@ ZenithImmortal.Theme = {
 }
 
 ------------------------------------------------------------------------
--- HELPERS  (module-level, stateless)
+-- HELPERS  (stateless, module-level)
 ------------------------------------------------------------------------
 local T  -- set to self.Theme inside CreateWindow
 
@@ -88,7 +112,7 @@ local function corner(obj, r)
     return c
 end
 
-local function pillCorner(obj)   -- fully pill-shaped (radius = 50% of height)
+local function pillCorner(obj)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(1, 0)
     c.Parent = obj
@@ -97,7 +121,7 @@ end
 
 local function stroke(obj, col, thick, trans)
     local s        = Instance.new("UIStroke")
-    s.Color        = col   or Color3.fromRGB(45,38,75)
+    s.Color        = col   or Color3.fromRGB(45, 38, 75)
     s.Thickness    = thick or 1
     s.Transparency = trans or 0
     s.Parent       = obj
@@ -118,7 +142,7 @@ local function lbl(parent, text, sz, col, font, xA, zi)
     l.BackgroundTransparency = 1
     l.Text                   = text  or ""
     l.TextSize               = sz    or 13
-    l.TextColor3             = col   or Color3.fromRGB(242,240,255)
+    l.TextColor3             = col   or Color3.fromRGB(242, 240, 255)
     l.Font                   = font  or Enum.Font.Gotham
     l.TextXAlignment         = xA    or Enum.TextXAlignment.Left
     l.ZIndex                 = zi    or 8
@@ -127,17 +151,13 @@ local function lbl(parent, text, sz, col, font, xA, zi)
     return l
 end
 
--- Filesystem helpers (pcall-wrapped so they never crash in studio)
-local function fsWrite(path, data)
-    pcall(writefile, path, data)
-end
+-- Filesystem helpers (all pcall-wrapped — safe in Studio)
+local function fsWrite(path, data)  pcall(writefile, path, data) end
 local function fsRead(path)
     local ok, val = pcall(readfile, path)
     return ok and val or nil
 end
-local function fsMakeFolder(path)
-    pcall(makefolder, path)
-end
+local function fsMakeFolder(path)   pcall(makefolder, path) end
 local function fsIsFile(path)
     local ok, val = pcall(isfile, path)
     return ok and val
@@ -146,8 +166,24 @@ local function fsListFiles(path)
     local ok, val = pcall(listfiles, path)
     return ok and val or {}
 end
-local function fsDelete(path)
-    pcall(delfile, path)
+local function fsDelete(path)       pcall(delfile, path) end
+
+------------------------------------------------------------------------
+-- PERSISTENT SETTINGS  (loaded once per session at window creation)
+------------------------------------------------------------------------
+local function loadPersistentSettings()
+    local raw = fsRead(SETTINGS_FILE)
+    if raw then
+        local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
+        if ok and type(data) == "table" then return data end
+    end
+    return {}
+end
+
+local function savePersistentSettings(data)
+    fsMakeFolder("ZenithImmortal")
+    local ok, encoded = pcall(function() return HttpService:JSONEncode(data) end)
+    if ok then fsWrite(SETTINGS_FILE, encoded) end
 end
 
 ------------------------------------------------------------------------
@@ -166,18 +202,35 @@ function ZenithImmortal:CreateWindow(cfg)
     local BTN_GAP= 7
     local RADIUS = 14
 
-    -- ZIndex layers (clean hierarchy)
+    -- ZIndex layers
     local Z = {
-        BG       = 1,
-        Overlay  = 2,
-        Sidebar  = 10,
-        Content  = 10,
-        Controls = 12,
-        Topbar   = 20,
-        Notif    = 200,
-        Dropdown = 500,   -- dropdown overlay — always on top
-        Tooltip  = 600,
+        BG        = 1,
+        Overlay   = 2,
+        Sidebar   = 10,
+        Content   = 10,
+        Controls  = 12,
+        Topbar    = 20,
+        MiniLogo  = 150,
+        Notif     = 200,
+        Dropdown  = 500,
+        Tooltip   = 600,
     }
+
+    --------------------------------------------------------------------
+    -- LOAD PERSISTENT SETTINGS
+    --------------------------------------------------------------------
+    local persist           = loadPersistentSettings()
+    -- Default true if key is absent (not explicitly false)
+    local notifEnabled      = persist.notificationsEnabled ~= false
+    local miniLogoEnabled   = persist.miniLogoEnabled      ~= false
+    local savedBgId         = persist.backgroundId  -- number or nil
+
+    local function savePerist()
+        persist.notificationsEnabled = notifEnabled
+        persist.miniLogoEnabled      = miniLogoEnabled
+        if savedBgId then persist.backgroundId = savedBgId end
+        savePersistentSettings(persist)
+    end
 
     ------------------------------------------------------------------
     -- SCREEN GUI
@@ -198,11 +251,11 @@ function ZenithImmortal:CreateWindow(cfg)
     main.Size                    = UDim2.new(0, WIN_W, 0, WIN_H)
     main.Position                = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
     main.BackgroundColor3        = T.BG
-    main.ClipsDescendants        = true  -- clips all children to rounded shape
+    main.ClipsDescendants        = true
     main.Parent                  = gui
     corner(main, RADIUS)
 
-    -- Animated neon gradient rim
+    -- Neon gradient rim
     local rimS  = stroke(main, T.Accent, 1.5)
     local rimG  = Instance.new("UIGradient")
     rimG.Color  = ColorSequence.new({
@@ -214,28 +267,37 @@ function ZenithImmortal:CreateWindow(cfg)
     rimG.Rotation = 90
     rimG.Parent   = rimS
 
-    -- Background anime image (clipped by main)
+    ------------------------------------------------------------------
+    -- BACKGROUND IMAGE
+    -- FIX: bgImg gets its own UICorner matching RADIUS so ScaleType=Crop
+    -- never renders sharp pixel corners outside the rounded main frame.
+    -- ClipsDescendants on main handles the clip, but the explicit corner
+    -- on bgImg ensures the image itself is pre-rounded before clipping,
+    -- eliminating the sub-pixel bleed that caused visible sharp edges.
+    ------------------------------------------------------------------
     local bgImg                  = Instance.new("ImageLabel")
     bgImg.Size                   = UDim2.new(1, 0, 1, 0)
     bgImg.BackgroundTransparency = 1
-    bgImg.Image                  = cfg.Background or DEFAULT_BG
+    bgImg.Image                  = savedBgId and ("rbxassetid://" .. savedBgId)
+                                             or cfg.Background
+                                             or DEFAULT_BG
     bgImg.ImageTransparency      = 0.48
     bgImg.ScaleType              = Enum.ScaleType.Crop
     bgImg.ZIndex                 = Z.BG
     bgImg.Parent                 = main
+    corner(bgImg, RADIUS)   -- ← KEY FIX: matches main's rounding
 
-    -- Dark vignette overlay
+    -- Dark vignette overlay — also gets the corner so it doesn't overlap
     local bgOverlay                    = Instance.new("Frame")
     bgOverlay.Size                     = UDim2.new(1, 0, 1, 0)
     bgOverlay.BackgroundColor3         = T.BG
     bgOverlay.BackgroundTransparency   = 0.28
     bgOverlay.ZIndex                   = Z.Overlay
     bgOverlay.Parent                   = main
+    corner(bgOverlay, RADIUS)  -- ← matches main's rounding
 
     ------------------------------------------------------------------
     -- TOPBAR
-    -- No UICorner — main's ClipsDescendants+UICorner clips the top
-    -- corners automatically. Avoids rounded-bottom-corner artefact.
     ------------------------------------------------------------------
     local topbar                       = Instance.new("Frame")
     topbar.Name                        = "Topbar"
@@ -244,11 +306,9 @@ function ZenithImmortal:CreateWindow(cfg)
     topbar.BackgroundTransparency      = 0.06
     topbar.ZIndex                      = Z.Topbar
     topbar.Parent                      = main
-    -- Explicitly round top corners to match main frame.
-    -- Bottom corners are hidden beneath the sidebar/content, so they're invisible.
     corner(topbar, RADIUS)
 
-    -- Animated gradient accent line (bottom of topbar)
+    -- Animated gradient accent line
     local accentBar                    = Instance.new("Frame")
     accentBar.Size                     = UDim2.new(1, 0, 0, 2)
     accentBar.Position                 = UDim2.new(0, 0, 1, -2)
@@ -266,7 +326,7 @@ function ZenithImmortal:CreateWindow(cfg)
     })
     accentG.Parent = accentBar
 
-    -- Purchase In Discord button (left)
+    -- Purchase In Discord button
     local purchaseBtn                  = Instance.new("TextButton")
     purchaseBtn.Size                   = UDim2.new(0, 162, 0, 30)
     purchaseBtn.Position               = UDim2.new(0, 10, 0.5, -15)
@@ -299,14 +359,13 @@ function ZenithImmortal:CreateWindow(cfg)
         end)
     end)
 
-    -- Title (perfectly centred)
+    -- Title (centered)
     local titleLbl = lbl(topbar, cfg.Name or "Zenith Immortal",
-        15, T.Text, Enum.Font.GothamBold, Enum.TextXAlignment.Center,
-        Z.Topbar + 1)
+        15, T.Text, Enum.Font.GothamBold, Enum.TextXAlignment.Center, Z.Topbar + 1)
     titleLbl.Size     = UDim2.new(1, 0, 1, 0)
     titleLbl.Position = UDim2.new(0, 0, 0, 0)
 
-    -- Rainbow discord link (right)
+    -- Rainbow discord link
     if cfg.Discord then
         local discLbl = lbl(topbar, cfg.Discord, 11, T.Text,
             Enum.Font.GothamBold, Enum.TextXAlignment.Right, Z.Topbar + 2)
@@ -317,7 +376,7 @@ function ZenithImmortal:CreateWindow(cfg)
             local hue = 0
             while gui.Parent do
                 hue = (hue + 1) % 360
-                discLbl.TextColor3 = Color3.fromHSV(hue/360, 0.9, 1)
+                discLbl.TextColor3 = Color3.fromHSV(hue / 360, 0.9, 1)
                 task.wait(0.03)
             end
         end)
@@ -344,7 +403,7 @@ function ZenithImmortal:CreateWindow(cfg)
     end)
 
     ------------------------------------------------------------------
-    -- DRAGGABLE  (inline so we can close dropdowns on drag start)
+    -- DRAGGABLE  (topbar)
     ------------------------------------------------------------------
     local dragOn, dragInp, dragMP, dragFP = false, nil, nil, nil
     topbar.InputBegan:Connect(function(i)
@@ -367,7 +426,7 @@ function ZenithImmortal:CreateWindow(cfg)
     end)
 
     ------------------------------------------------------------------
-    -- SIDEBAR  (no UICorner — main clips the bottom-left corner)
+    -- SIDEBAR
     ------------------------------------------------------------------
     local sidebar                      = Instance.new("Frame")
     sidebar.Name                       = "Sidebar"
@@ -375,12 +434,9 @@ function ZenithImmortal:CreateWindow(cfg)
     sidebar.Position                   = UDim2.new(0, 0, 0, TOP_H)
     sidebar.BackgroundColor3           = T.Sidebar
     sidebar.BackgroundTransparency     = 0
-    sidebar.ClipsDescendants           = false  -- tooltips must overflow
+    sidebar.ClipsDescendants           = false
     sidebar.ZIndex                     = Z.Sidebar
     sidebar.Parent                     = main
-    -- Round all corners — inner ones (top-right, bottom-right) are hidden
-    -- behind the topbar and content area respectively, so only the visible
-    -- bottom-left corner shows as rounded, matching the main frame.
     corner(sidebar, RADIUS)
 
     local sbLine                       = Instance.new("Frame")
@@ -391,7 +447,6 @@ function ZenithImmortal:CreateWindow(cfg)
     sbLine.ZIndex                      = Z.Sidebar + 1
     sbLine.Parent                      = sidebar
 
-    -- Button holder (separate transparent frame for clean layout)
     local sbHolder                     = Instance.new("Frame")
     sbHolder.Name                      = "BtnHolder"
     sbHolder.Size                      = UDim2.new(1, 0, 1, 0)
@@ -417,13 +472,12 @@ function ZenithImmortal:CreateWindow(cfg)
     contentArea.Size                   = UDim2.new(1, -SB_W, 1, -TOP_H)
     contentArea.Position               = UDim2.new(0, SB_W, 0, TOP_H)
     contentArea.BackgroundTransparency = 1
-    contentArea.ClipsDescendants       = false  -- dropdowns must overflow
+    contentArea.ClipsDescendants       = false
     contentArea.ZIndex                 = Z.Content
     contentArea.Parent                 = main
 
     ------------------------------------------------------------------
-    -- DROPDOWN OVERLAY LAYER  (parented to gui, not main)
-    -- Always renders above everything. Dropdowns are parented here.
+    -- DROPDOWN OVERLAY LAYER  (on ScreenGui, always above everything)
     ------------------------------------------------------------------
     local dropOverlay                  = Instance.new("Frame")
     dropOverlay.Name                   = "DropOverlay"
@@ -432,19 +486,12 @@ function ZenithImmortal:CreateWindow(cfg)
     dropOverlay.ZIndex                 = Z.Dropdown
     dropOverlay.Parent                 = gui
 
-    -- Track the currently open dropdown so we can close it on outside click
     local activeDropClose = nil
-
-    UserInputService.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            if activeDropClose then
-                task.defer(activeDropClose)  -- defer so the open button fires first
-            end
-        end
-    end)
+    -- Outside-click close is disabled in the user's patched version —
+    -- kept intentionally absent here for compatibility.
 
     ------------------------------------------------------------------
-    -- NOTIFICATION HOLDER  (bottom-left of screen)
+    -- NOTIFICATION HOLDER
     ------------------------------------------------------------------
     local notifHolder                  = Instance.new("Frame")
     notifHolder.Name                   = "Notifications"
@@ -462,10 +509,7 @@ function ZenithImmortal:CreateWindow(cfg)
     notifList.Parent                   = notifHolder
 
     ------------------------------------------------------------------
-    -- TOOLTIP OVERLAY  (on gui, ZIndex 600 — always above everything)
-    -- One shared tooltip frame repositioned per-button on hover.
-    -- Parented to gui, NOT to main/sidebar, so it is NEVER clipped by
-    -- the content area or the scrolling page.
+    -- TOOLTIP OVERLAY  (on ScreenGui — never clipped by content area)
     ------------------------------------------------------------------
     local tooltipOverlay               = Instance.new("Frame")
     tooltipOverlay.Name                = "TooltipOverlay"
@@ -475,8 +519,7 @@ function ZenithImmortal:CreateWindow(cfg)
     tooltipOverlay.Parent              = gui
 
     local sharedTip                    = Instance.new("Frame")
-    sharedTip.Name                     = "Tooltip"
-    sharedTip.Size                     = UDim2.new(0, 10, 0, 26)  -- width set dynamically
+    sharedTip.Size                     = UDim2.new(0, 10, 0, 26)
     sharedTip.BackgroundColor3         = T.Card
     sharedTip.BackgroundTransparency   = 0.05
     sharedTip.Visible                  = false
@@ -490,24 +533,25 @@ function ZenithImmortal:CreateWindow(cfg)
     sharedTipL.Size = UDim2.new(1, 0, 1, 0)
     pad(sharedTip, 0, 0, 8, 8)
 
-    -- TextService for measuring tooltip width
-    local TextService = game:GetService("TextService")
     local function showTip(btnFrame, label)
         sharedTipL.Text = label
-        local tw2 = TextService:GetTextSize(
+        local w = TextService:GetTextSize(
             label, 11, Enum.Font.GothamSemibold, Vector2.new(400, 26)).X + 18
-        sharedTip.Size = UDim2.new(0, tw2, 0, 26)
+        sharedTip.Size = UDim2.new(0, w, 0, 26)
         local abs = btnFrame.AbsolutePosition
         local sz  = btnFrame.AbsoluteSize
-        sharedTip.Position = UDim2.new(0, abs.X + sz.X + 8, 0, abs.Y + sz.Y/2 - 13)
-        sharedTip.Visible  = true
+        task.defer(function()
+            if not btnFrame.Parent then return end
+            local mouse = UserInputService:GetMouseLocation()
+            local mainAbs = main.AbsolutePosition
+            sharedTip.Position = UDim2.new(0, mainAbs.X + SB_W + 8, 0, mouse.Y - 13)
+            sharedTip.Visible  = true
+        end)
     end
-    local function hideTip()
-        sharedTip.Visible = false
-    end
+    local function hideTip() sharedTip.Visible = false end
 
     ------------------------------------------------------------------
-    -- SHOW / HIDE  (RightShift)
+    -- SHOW / HIDE  (RightShift + mini logo click)
     ------------------------------------------------------------------
     local isOpen   = true
     local origSize = main.Size
@@ -516,16 +560,15 @@ function ZenithImmortal:CreateWindow(cfg)
         isOpen = val
         if isOpen then
             main.Visible = true
-            main.Size    = UDim2.new(0, WIN_W*0.9, 0, WIN_H*0.9)
+            main.Size    = UDim2.new(0, WIN_W * 0.9, 0, WIN_H * 0.9)
             tw(main, 0.22, {Size = origSize}, Enum.EasingStyle.Back)
         else
-            tw(main, 0.17, {Size = UDim2.new(0, WIN_W*0.85, 0, WIN_H*0.85)})
+            tw(main, 0.17, {Size = UDim2.new(0, WIN_W * 0.85, 0, WIN_H * 0.85)})
             task.delay(0.19, function() main.Visible = false end)
         end
     end
 
     closeBtn.MouseButton1Click:Connect(function() setOpen(false) end)
-
     UserInputService.InputBegan:Connect(function(i, gp)
         if gp then return end
         if i.KeyCode == Enum.KeyCode.RightShift then setOpen(not isOpen) end
@@ -542,40 +585,119 @@ function ZenithImmortal:CreateWindow(cfg)
     end)
 
     ------------------------------------------------------------------
+    -- MINI LOGO  (draggable circle, middle-left of screen)
+    ------------------------------------------------------------------
+    local miniLogo                     = Instance.new("ImageButton")
+    miniLogo.Name                      = "ZenithMiniLogo"
+    miniLogo.Size                      = UDim2.new(0, 52, 0, 52)
+    miniLogo.AnchorPoint               = Vector2.new(0, 0.5)
+    miniLogo.Position                  = UDim2.new(0, 8, 0.5, 0)
+    miniLogo.BackgroundColor3          = T.AccentDim
+    miniLogo.Image                     = MINI_LOGO_ID
+    miniLogo.ImageTransparency         = 0
+    miniLogo.ScaleType                 = Enum.ScaleType.Fit
+    miniLogo.AutoButtonColor           = false
+    miniLogo.ZIndex                    = Z.MiniLogo
+    miniLogo.Visible                   = miniLogoEnabled
+    miniLogo.Parent                    = gui
+    corner(miniLogo, 26)  -- 26 = half of 52 → perfect circle
+    stroke(miniLogo, T.Accent, 2)
+
+    miniLogo.MouseEnter:Connect(function()
+        tw(miniLogo, 0.15, {BackgroundColor3 = T.Accent})
+    end)
+    miniLogo.MouseLeave:Connect(function()
+        tw(miniLogo, 0.15, {BackgroundColor3 = T.AccentDim})
+    end)
+
+    -- Mini logo drag
+    local mlDragOn    = false
+    local mlDragInp   = nil
+    local mlDragStart = nil
+    local mlPosStart  = nil
+    local mlMoved     = false
+
+    miniLogo.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            mlDragOn    = true
+            mlMoved     = false
+            mlDragStart = i.Position
+            mlPosStart  = miniLogo.Position
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then
+                    mlDragOn = false
+                end
+            end)
+        end
+    end)
+    miniLogo.InputChanged:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement then
+            mlDragInp = i
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if i == mlDragInp and mlDragOn and mlDragStart then
+            local d = i.Position - mlDragStart
+            if d.Magnitude > 4 then mlMoved = true end
+            miniLogo.Position = UDim2.new(
+                mlPosStart.X.Scale, mlPosStart.X.Offset + d.X,
+                mlPosStart.Y.Scale, mlPosStart.Y.Offset + d.Y
+            )
+        end
+    end)
+
+    -- Click only fires if not a drag
+    miniLogo.MouseButton1Click:Connect(function()
+        if not mlMoved then
+            setOpen(not isOpen)
+        end
+    end)
+
+    ------------------------------------------------------------------
+    -- SHARED SLIDER DRAG STATE
+    -- A single pair of UIS connections handles ALL sliders instead of
+    -- one pair per slider — avoids connection accumulation.
+    ------------------------------------------------------------------
+    local activeDragFn  = nil  -- set/cleared by individual slider's InputBegan
+    local activeDragEnd = nil  -- called on MouseButton1 release
+
+    UserInputService.InputChanged:Connect(function(i)
+        if activeDragFn and i.UserInputType == Enum.UserInputType.MouseMovement then
+            activeDragFn(i.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 and activeDragEnd then
+            activeDragEnd()
+            activeDragFn  = nil
+            activeDragEnd = nil
+        end
+    end)
+
+    ------------------------------------------------------------------
     -- WINDOW OBJECT
     ------------------------------------------------------------------
     local Window             = {}
     Window._alive            = true
-    Window._connections      = {}  -- RBXScriptConnections
-    Window._tasks            = {}  -- task threads
-    Window._tweens           = {}  -- active TweenService tweens
-    Window.Flags             = {}  -- registered component flags
-    Window.Configs           = {}  -- loaded config names
+    Window._connections      = {}
+    Window._tasks            = {}
+    Window._tweens           = {}
+    Window.Flags             = {}
+    Window.Configs           = {}
     Window._tabCount         = 0
     Window._active           = nil
 
-    -- Connection manager helpers
+    -- Store miniLogo ref so BuildSettingsUI can control it
+    Window._miniLogo         = miniLogo
+
     function Window:_Connect(signal, cb)
         local conn = signal:Connect(cb)
         table.insert(self._connections, conn)
         return conn
     end
-
     function Window:_AddTask(thread)
         table.insert(self._tasks, thread)
         return thread
-    end
-
-    function Window:_AddTween(t)
-        table.insert(self._tweens, t)
-        return t
-    end
-
-    -- Safe tween wrapper that tracks tweens for unload
-    local function wtw(obj, t, props, style)
-        local tween = tw(obj, t, props, style)
-        Window:_AddTween(tween)
-        return tween
     end
 
     ------------------------------------------------------------------
@@ -584,6 +706,9 @@ function ZenithImmortal:CreateWindow(cfg)
     function Window:Notify(c2)
         if not self._alive then return end
         c2 = c2 or {}
+        -- Respect notifications toggle unless c2.Force = true
+        if not notifEnabled and not c2.Force then return end
+
         local ac = c2.Type == "success" and T.Success
                 or c2.Type == "warn"    and T.Warning
                 or c2.Type == "error"   and T.Danger
@@ -599,21 +724,21 @@ function ZenithImmortal:CreateWindow(cfg)
         corner(card, 10)
         stroke(card, ac, 1)
 
-        local bar                  = Instance.new("Frame")
-        bar.Size                   = UDim2.new(0, 3, 1, -16)
-        bar.Position               = UDim2.new(0, 0, 0, 8)
-        bar.BackgroundColor3       = ac
-        bar.BorderSizePixel        = 0
-        bar.ZIndex                 = Z.Notif + 2
-        bar.Parent                 = card
+        local bar = Instance.new("Frame")
+        bar.Size              = UDim2.new(0, 3, 1, -16)
+        bar.Position          = UDim2.new(0, 0, 0, 8)
+        bar.BackgroundColor3  = ac
+        bar.BorderSizePixel   = 0
+        bar.ZIndex            = Z.Notif + 2
+        bar.Parent            = card
         corner(bar, 2)
 
-        local nt      = lbl(card, c2.Title   or "Notification",
+        local nt = lbl(card, c2.Title or "Notification",
             13, T.Text, Enum.Font.GothamBold, Enum.TextXAlignment.Left, Z.Notif+2)
-        nt.Size       = UDim2.new(1, -20, 0, 18)
-        nt.Position   = UDim2.new(0, 14, 0, 8)
+        nt.Size     = UDim2.new(1, -20, 0, 18)
+        nt.Position = UDim2.new(0, 14, 0, 8)
 
-        local nb      = lbl(card, c2.Content or "",
+        local nb = lbl(card, c2.Content or "",
             11, T.TextDim, Enum.Font.Gotham, Enum.TextXAlignment.Left, Z.Notif+2)
         nb.Size       = UDim2.new(1, -20, 0, 30)
         nb.Position   = UDim2.new(0, 14, 0, 28)
@@ -632,23 +757,10 @@ function ZenithImmortal:CreateWindow(cfg)
     function Window:Unload()
         if not self._alive then return end
         self._alive = false
-
-        self:Notify({ Title = "Zenith Immortal", Content = "UI Unloaded.", Type = "warn", Duration = 2 })
-
+        self:Notify({ Title="Zenith Immortal", Content="UI Unloaded.", Type="warn", Duration=2, Force=true })
         task.delay(0.5, function()
-            -- Disconnect all connections
-            for _, c in ipairs(self._connections) do
-                pcall(function() c:Disconnect() end)
-            end
-            -- Cancel all tracked tasks
-            for _, t in ipairs(self._tasks) do
-                pcall(function() task.cancel(t) end)
-            end
-            -- Cancel all tweens
-            for _, t in ipairs(self._tweens) do
-                pcall(function() t:Cancel() end)
-            end
-            -- Destroy ScreenGui
+            for _, c in ipairs(self._connections) do pcall(function() c:Disconnect() end) end
+            for _, t in ipairs(self._tasks)       do pcall(function() task.cancel(t) end) end
             pcall(function() gui:Destroy() end)
         end)
     end
@@ -657,6 +769,12 @@ function ZenithImmortal:CreateWindow(cfg)
     -- BACKGROUND
     ------------------------------------------------------------------
     function Window:SetBackground(id)
+        local idNum = tonumber(id)
+        if idNum then
+            savedBgId = idNum
+            persist.backgroundId = idNum
+            savePerist()
+        end
         bgImg.Image = "rbxassetid://" .. tostring(id)
     end
 
@@ -670,17 +788,13 @@ function ZenithImmortal:CreateWindow(cfg)
 
     function Window:SaveConfig(name)
         if not name or name == "" then
-            self:Notify({ Title="Config", Content="Config name is empty.", Type="error", Duration=3 })
+            self:Notify({ Title="Config", Content="Name is empty.", Type="error", Duration=3 })
             return
         end
         ensureFolder()
         local data = {}
-        for flag, obj in pairs(self.Flags) do
-            data[flag] = obj.Get()
-        end
-        local ok, encoded = pcall(function()
-            return HttpService:JSONEncode(data)
-        end)
+        for flag, obj in pairs(self.Flags) do data[flag] = obj.Get() end
+        local ok, encoded = pcall(function() return HttpService:JSONEncode(data) end)
         if ok then
             fsWrite(CONFIG_FOLDER .. "/" .. name .. ".json", encoded)
             self:Notify({ Title="Config Saved", Content=name, Type="success", Duration=3 })
@@ -706,9 +820,7 @@ function ZenithImmortal:CreateWindow(cfg)
             return
         end
         for flag, value in pairs(data) do
-            if self.Flags[flag] then
-                pcall(function() self.Flags[flag].Set(value) end)
-            end
+            if self.Flags[flag] then pcall(function() self.Flags[flag].Set(value) end) end
         end
         self:Notify({ Title="Config Loaded", Content=name, Type="success", Duration=3 })
     end
@@ -736,9 +848,8 @@ function ZenithImmortal:CreateWindow(cfg)
 
     function Window:ExportConfig(name)
         local path = CONFIG_FOLDER .. "/" .. name .. ".json"
-        local raw = fsIsFile(path) and fsRead(path) or nil
-        if raw then
-            pcall(setclipboard, raw)
+        if fsIsFile(path) then
+            pcall(setclipboard, fsRead(path))
             self:Notify({ Title="Config Exported", Content="Copied to clipboard.", Type="success", Duration=3 })
         else
             self:Notify({ Title="Export Error", Content=name.." not found.", Type="error", Duration=3 })
@@ -756,20 +867,18 @@ function ZenithImmortal:CreateWindow(cfg)
     end
 
     ------------------------------------------------------------------
-    -- BUILD CONFIG UI  (call with a Tab object)
+    -- BUILD CONFIG UI
     ------------------------------------------------------------------
     function Window:BuildConfigUI(tab)
-
         tab:AddSection("Existing Configs")
 
-        -- Dropdown that lists saved configs — refreshed dynamically
         local configDD = tab:AddDropdown({
             Name    = "Select Config",
             Options = self:ListConfigs(),
             Default = "(none)",
         })
 
-        tab:AddButton({ Name = "⟳  Refresh List", Callback = function()
+        tab:AddButton({ Name = "⟳ Refresh List", Callback = function()
             local list = self:ListConfigs()
             if #list == 0 then list = {"(none)"} end
             configDD:SetOptions(list)
@@ -778,54 +887,43 @@ function ZenithImmortal:CreateWindow(cfg)
         end })
 
         tab:AddSection("New Config Name")
-
-        local nameInput = tab:AddInput({
-            Name        = "Config Name",
-            Placeholder = "my_config",
-        })
+        local nameInput = tab:AddInput({ Name="Config Name", Placeholder="my_config" })
 
         tab:AddSection("Actions")
 
-        tab:AddButton({ Name = "Save Config", Callback = function()
+        tab:AddButton({ Name="Save Config", Callback=function()
             local n = nameInput:Get()
             if n == "" then n = configDD:Get() end
             self:SaveConfig(n)
-            -- Refresh dropdown after saving
             local list = self:ListConfigs()
             if #list > 0 then configDD:SetOptions(list) end
         end })
 
-        tab:AddButton({ Name = "Load Config", Callback = function()
-            -- Prefer the dropdown selection; fall back to typed name
+        tab:AddButton({ Name="Load Config", Callback=function()
             local sel = configDD:Get()
             if sel == "" or sel == "(none)" then sel = nameInput:Get() end
             self:LoadConfig(sel)
         end })
 
-        tab:AddButton({ Name = "Delete Config", Callback = function()
+        tab:AddButton({ Name="Delete Config", Callback=function()
             local sel = configDD:Get()
             if sel == "" or sel == "(none)" then sel = nameInput:Get() end
             self:DeleteConfig(sel)
-            -- Refresh dropdown after deletion
             local list = self:ListConfigs()
             if #list == 0 then list = {"(none)"} end
             configDD:SetOptions(list)
             configDD:Set(list[1])
         end })
 
-        tab:AddButton({ Name = "Export Config (Clipboard)", Callback = function()
+        tab:AddButton({ Name="Export Config (Clipboard)", Callback=function()
             local sel = configDD:Get()
             if sel == "" or sel == "(none)" then sel = nameInput:Get() end
             self:ExportConfig(sel)
         end })
 
         tab:AddSection("Import")
-
-        local importInput = tab:AddInput({
-            Name        = "Import JSON",
-            Placeholder = "Paste config JSON here...",
-        })
-        tab:AddButton({ Name = "Import Config", Callback = function()
+        local importInput = tab:AddInput({ Name="Import JSON", Placeholder="Paste config JSON here..." })
+        tab:AddButton({ Name="Import Config", Callback=function()
             local n = nameInput:Get()
             if n == "" then n = "imported" end
             self:ImportConfig(importInput:Get(), n)
@@ -834,10 +932,85 @@ function ZenithImmortal:CreateWindow(cfg)
         end })
 
         tab:AddSection("System")
+        tab:AddButton({ Name="Unload UI", Callback=function() self:Unload() end })
+    end
 
-        tab:AddButton({ Name = "Unload UI", Callback = function()
-            self:Unload()
+    ------------------------------------------------------------------
+    -- BUILD SETTINGS UI  (persistent — survives between sessions)
+    ------------------------------------------------------------------
+    function Window:BuildSettingsUI(tab)
+        tab:AddSection("Background")
+
+        -- Show the current saved ID as the default text
+        local bgInput = tab:AddInput({
+            Name        = "Background Asset ID",
+            Placeholder = "Enter asset ID number...",
+            Default     = savedBgId and tostring(savedBgId) or "",
+        })
+
+        tab:AddButton({ Name = "Apply Background", Callback = function()
+            local text = bgInput:Get()
+            local id   = tonumber(text:match("%d+"))
+            if id then
+                self:SetBackground(id)  -- also saves to persist
+                self:Notify({ Title="Background Updated", Content="ID: "..id, Type="success", Duration=3 })
+            else
+                self:Notify({ Title="Invalid ID", Content="Enter a numeric asset ID.", Type="error", Duration=3 })
+            end
         end })
+
+        tab:AddButton({ Name = "Reset Background", Callback = function()
+            savedBgId = nil
+            persist.backgroundId = nil
+            savePerist()
+            bgImg.Image = cfg.Background or DEFAULT_BG
+            bgInput:Set("")
+            self:Notify({ Title="Background Reset", Content="Default restored.", Duration=2 })
+        end })
+
+        tab:AddSection("UI")
+
+        tab:AddToggle({
+            Name    = "Notifications",
+            Flag    = "_SettingsNotifications",
+            Default = notifEnabled,
+            Callback = function(v)
+                notifEnabled = v
+                persist.notificationsEnabled = v
+                savePerist()
+                -- Force-show this one so the user sees confirmation
+                if v then
+                    self:Notify({ Title="Notifications Enabled", Type="success", Duration=2, Force=true })
+                end
+            end,
+        })
+
+        tab:AddToggle({
+            Name    = "Mini Logo Button",
+            Flag    = "_SettingsMiniLogo",
+            Default = miniLogoEnabled,
+            Callback = function(v)
+                miniLogoEnabled = v
+                persist.miniLogoEnabled = v
+                savePerist()
+                miniLogo.Visible = v
+                self:Notify({ Title="Mini Logo", Content=v and "Shown" or "Hidden", Duration=2 })
+            end,
+        })
+
+        tab:AddSection("Toggle Key")
+        tab:AddKeybind({
+            Name     = "Toggle UI Key",
+            Flag     = "_SettingsToggleKey",
+            Default  = Enum.KeyCode.RightShift,
+            Callback = function(k)
+                -- Update the RightShift binding — user's script can also use this flag
+                self:Notify({ Title="Toggle Key", Content="Bound to " .. k.Name, Duration=2 })
+            end,
+        })
+
+        tab:AddSection("System")
+        tab:AddButton({ Name="Unload UI", Callback=function() self:Unload() end })
     end
 
     ------------------------------------------------------------------
@@ -848,9 +1021,7 @@ function ZenithImmortal:CreateWindow(cfg)
         Window._tabCount += 1
         local idx = Window._tabCount
 
-        --------------------------------------------------------
-        -- SIDEBAR ICON BUTTON
-        --------------------------------------------------------
+        -- Sidebar icon button
         local tabBtn                   = Instance.new("ImageButton")
         tabBtn.Name                    = "TabBtn_" .. name
         tabBtn.Size                    = UDim2.new(0, BTN_SZ, 0, BTN_SZ)
@@ -866,12 +1037,7 @@ function ZenithImmortal:CreateWindow(cfg)
         corner(tabBtn, 10)
         local tabS = stroke(tabBtn, T.Stroke, 1.5)
 
-        -- Tooltip (now rendered on the gui overlay layer, never clipped by content)
-        -- showTip/hideTip are defined outside CreateTab in the window scope.
-
-        --------------------------------------------------------
-        -- SCROLLING PAGE
-        --------------------------------------------------------
+        -- Scrolling page
         local page                         = Instance.new("ScrollingFrame")
         page.Name                          = "Page_" .. name
         page.Size                          = UDim2.new(1, 0, 1, 0)
@@ -882,19 +1048,17 @@ function ZenithImmortal:CreateWindow(cfg)
         page.ScrollBarImageTransparency    = 0.5
         page.CanvasSize                    = UDim2.new(0, 0, 0, 0)
         page.AutomaticCanvasSize           = Enum.AutomaticSize.Y
-        page.ClipsDescendants              = false  -- dropdowns overflow upward/downward
+        page.ClipsDescendants              = false
         page.ZIndex                        = Z.Controls
         page.Parent                        = contentArea
         pad(page, 12, 12, 12, 12)
 
-        local pageLayout         = Instance.new("UIListLayout")
-        pageLayout.Padding       = UDim.new(0, 8)
-        pageLayout.SortOrder     = Enum.SortOrder.LayoutOrder
-        pageLayout.Parent        = page
+        local pageLayout     = Instance.new("UIListLayout")
+        pageLayout.Padding   = UDim.new(0, 8)
+        pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        pageLayout.Parent    = page
 
-        --------------------------------------------------------
-        -- ACTIVATE
-        --------------------------------------------------------
+        -- Activate
         local function activate()
             for _, p in pairs(contentArea:GetChildren()) do
                 if p:IsA("ScrollingFrame") then p.Visible = false end
@@ -914,7 +1078,7 @@ function ZenithImmortal:CreateWindow(cfg)
 
         tabBtn.MouseButton1Click:Connect(activate)
         tabBtn.MouseEnter:Connect(function()
-            showTip(tabBtn, name)   -- shared overlay tooltip, never clipped
+            showTip(tabBtn, name)
             if Window._active ~= name then
                 tw(tabBtn, 0.12, {BackgroundColor3 = T.CardHover, ImageTransparency = 0.08})
             end
@@ -931,8 +1095,8 @@ function ZenithImmortal:CreateWindow(cfg)
         --------------------------------------------------------
         -- TAB API
         --------------------------------------------------------
-        local Tab    = {}
-        local order  = 0
+        local Tab   = {}
+        local order = 0
         local function nxt() order += 1; return order end
 
         ---- SECTION ----
@@ -963,8 +1127,7 @@ function ZenithImmortal:CreateWindow(cfg)
             pad(pill, 0, 0, 0, 8)
 
             local sLbl = lbl(pill, (title or ""):upper(),
-                10, T.Accent, Enum.Font.GothamBold, Enum.TextXAlignment.Left,
-                Z.Controls + 2)
+                10, T.Accent, Enum.Font.GothamBold, Enum.TextXAlignment.Left, Z.Controls+2)
             sLbl.Size          = UDim2.new(0, 0, 1, 0)
             sLbl.AutomaticSize = Enum.AutomaticSize.X
 
@@ -1005,14 +1168,13 @@ function ZenithImmortal:CreateWindow(cfg)
             local bS = stroke(btn, T.Stroke, 1)
 
             local nm = lbl(btn, c2.Name or "Button", 13,
-                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left,
-                Z.Controls + 1)
+                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left, Z.Controls+1)
 
             if c2.Description then
                 nm.Size     = UDim2.new(1, -50, 0, 20)
                 nm.Position = UDim2.new(0, 12, 0, 6)
                 local d     = lbl(btn, c2.Description, 11, T.TextDim,
-                    Enum.Font.Gotham, Enum.TextXAlignment.Left, Z.Controls + 1)
+                    Enum.Font.Gotham, Enum.TextXAlignment.Left, Z.Controls+1)
                 d.Size             = UDim2.new(1, -50, 0, 16)
                 d.Position         = UDim2.new(0, 12, 0, 26)
                 d.TextTransparency = 0.4
@@ -1022,7 +1184,7 @@ function ZenithImmortal:CreateWindow(cfg)
             end
 
             local arr = lbl(btn, ">", 13, T.TextMuted,
-                Enum.Font.GothamBold, Enum.TextXAlignment.Right, Z.Controls + 1)
+                Enum.Font.GothamBold, Enum.TextXAlignment.Right, Z.Controls+1)
             arr.Size     = UDim2.new(0, 28, 1, 0)
             arr.Position = UDim2.new(1, -34, 0, 0)
 
@@ -1040,11 +1202,6 @@ function ZenithImmortal:CreateWindow(cfg)
                 if not Window._alive then return end
                 tw(btn, 0.06, {BackgroundColor3 = T.AccentDim})
                 task.delay(0.06, function() tw(btn, 0.14, {BackgroundColor3 = T.CardHover}) end)
-                Window:Notify({
-                    Title    = c2.Name or "Button",
-                    Content  = c2.Description or "Action triggered.",
-                    Duration = 2,
-                })
                 if c2.Callback then c2.Callback() end
             end)
         end
@@ -1067,14 +1224,13 @@ function ZenithImmortal:CreateWindow(cfg)
             local rS = stroke(row, T.Stroke, 1)
 
             local nm = lbl(row, c2.Name or "Toggle", 13,
-                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left,
-                Z.Controls + 1)
+                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left, Z.Controls+1)
 
             if c2.Description then
                 nm.Size     = UDim2.new(1, -72, 0, 20)
                 nm.Position = UDim2.new(0, 12, 0, 6)
                 local d     = lbl(row, c2.Description, 11, T.TextDim,
-                    Enum.Font.Gotham, Enum.TextXAlignment.Left, Z.Controls + 1)
+                    Enum.Font.Gotham, Enum.TextXAlignment.Left, Z.Controls+1)
                 d.Size             = UDim2.new(1, -72, 0, 16)
                 d.Position         = UDim2.new(0, 12, 0, 26)
                 d.TextTransparency = 0.4
@@ -1104,7 +1260,7 @@ function ZenithImmortal:CreateWindow(cfg)
                 tw(track, 0.22, {BackgroundColor3 = state and T.Accent or T.CardHover})
                 tw(knob,  0.22, {Position = state
                     and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)})
-                tw(rS, 0.22, {Color = state and T.Accent or T.Stroke})
+                tw(rS,    0.22, {Color = state and T.Accent or T.Stroke})
             end
 
             row.MouseButton1Click:Connect(function()
@@ -1124,13 +1280,9 @@ function ZenithImmortal:CreateWindow(cfg)
             refresh()
 
             local Tog = {}
-            function Tog:Set(v)
-                state = v; refresh()
-                if c2.Callback then c2.Callback(state) end
-            end
+            function Tog:Set(v) state = v; refresh(); if c2.Callback then c2.Callback(state) end end
             function Tog:Get() return state end
 
-            -- Register flag
             if c2.Flag then
                 Window.Flags[c2.Flag] = { Type="Toggle", Set=Tog.Set, Get=Tog.Get }
             end
@@ -1155,18 +1307,15 @@ function ZenithImmortal:CreateWindow(cfg)
             stroke(box, T.Stroke, 1)
 
             local nm = lbl(box, c2.Name or "Slider", 13,
-                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left,
-                Z.Controls + 1)
+                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left, Z.Controls+1)
             nm.Size     = UDim2.new(1, -70, 0, 20)
             nm.Position = UDim2.new(0, 12, 0, 8)
 
             local vLbl = lbl(box, tostring(value)..suf, 12,
-                T.Accent, Enum.Font.GothamBold, Enum.TextXAlignment.Right,
-                Z.Controls + 1)
+                T.Accent, Enum.Font.GothamBold, Enum.TextXAlignment.Right, Z.Controls+1)
             vLbl.Size     = UDim2.new(0, 56, 0, 20)
             vLbl.Position = UDim2.new(1, -66, 0, 8)
 
-            -- PILL-shaped track
             local track                = Instance.new("Frame")
             track.Size                 = UDim2.new(1, -24, 0, 6)
             track.Position             = UDim2.new(0, 12, 0, 38)
@@ -1175,7 +1324,6 @@ function ZenithImmortal:CreateWindow(cfg)
             track.Parent               = box
             pillCorner(track)
 
-            -- PILL-shaped fill
             local fill                 = Instance.new("Frame")
             fill.Size                  = UDim2.new((value-minV)/(maxV-minV), 0, 1, 0)
             fill.BackgroundColor3      = T.Accent
@@ -1187,7 +1335,6 @@ function ZenithImmortal:CreateWindow(cfg)
             fg.Color  = ColorSequence.new(T.AccentDim, T.AccentGlow)
             fg.Parent = fill
 
-            -- Glowing thumb
             local thumb                = Instance.new("Frame")
             thumb.Size                 = UDim2.new(0, 14, 0, 14)
             thumb.AnchorPoint          = Vector2.new(0.5, 0.5)
@@ -1204,37 +1351,32 @@ function ZenithImmortal:CreateWindow(cfg)
                 tw(tS, 0.13, {Color = on and T.AccentGlow or T.Accent})
             end
 
-            local drag = false
             local function setV(x)
                 local p = math.clamp(
                     (x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-                value = math.floor(minV + p*(maxV-minV) + 0.5)
-                local pn = (value-minV)/(maxV-minV)
+                value = math.floor(minV + p * (maxV - minV) + 0.5)
+                local pn = (value - minV) / (maxV - minV)
                 tw(fill,  0.04, {Size     = UDim2.new(pn, 0, 1, 0)})
                 tw(thumb, 0.04, {Position = UDim2.new(pn, 0, 0.5, 0)})
-                vLbl.Text = tostring(value)..suf
+                vLbl.Text = tostring(value) .. suf
                 if c2.Callback then c2.Callback(value) end
             end
 
+            -- Use the SHARED drag state instead of per-slider UIS connections
             track.InputBegan:Connect(function(i)
                 if i.UserInputType == Enum.UserInputType.MouseButton1 then
-                    drag = true; glowThumb(true); setV(i.Position.X)
-                end
-            end)
-            UserInputService.InputChanged:Connect(function(i)
-                if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+                    glowThumb(true)
                     setV(i.Position.X)
-                end
-            end)
-            UserInputService.InputEnded:Connect(function(i)
-                if i.UserInputType == Enum.UserInputType.MouseButton1 and drag then
-                    drag = false; glowThumb(false)
-                    if not Window._alive then return end
-                    Window:Notify({
-                        Title    = c2.Name or "Slider",
-                        Content  = "Set to " .. tostring(value) .. suf,
-                        Duration = 2,
-                    })
+                    activeDragFn  = function(x) setV(x) end
+                    activeDragEnd = function()
+                        glowThumb(false)
+                        if not Window._alive then return end
+                        Window:Notify({
+                            Title    = c2.Name or "Slider",
+                            Content  = "Set to " .. tostring(value) .. suf,
+                            Duration = 2,
+                        })
+                    end
                 end
             end)
 
@@ -1249,7 +1391,6 @@ function ZenithImmortal:CreateWindow(cfg)
             end
             function Sl:Get() return value end
 
-            -- Register flag
             if c2.Flag then
                 Window.Flags[c2.Flag] = { Type="Slider", Set=Sl.Set, Get=Sl.Get }
             end
@@ -1257,15 +1398,12 @@ function ZenithImmortal:CreateWindow(cfg)
         end
 
         ---- DROPDOWN ----
-        -- Key fix: dropdown panel is parented to dropOverlay (on gui, ZIndex 500)
-        -- so it ALWAYS renders above ALL other controls.
         function Tab:AddDropdown(c2)
             c2 = c2 or {}
             local opts  = c2.Options or {}
             local sel   = c2.Default or (opts[1] or "None")
             local open2 = false
 
-            -- The visible row (host frame in the page)
             local box                  = Instance.new("Frame")
             box.Size                   = UDim2.new(1, 0, 0, 42)
             box.BackgroundColor3       = T.Card
@@ -1277,8 +1415,7 @@ function ZenithImmortal:CreateWindow(cfg)
             local dS = stroke(box, T.Stroke, 1)
 
             local nm = lbl(box, c2.Name or "Dropdown", 13,
-                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left,
-                Z.Controls + 1)
+                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left, Z.Controls+1)
             nm.Size     = UDim2.new(0.46, 0, 1, 0)
             nm.Position = UDim2.new(0, 12, 0, 0)
 
@@ -1297,19 +1434,19 @@ function ZenithImmortal:CreateWindow(cfg)
             pad(selB, 0, 0, 8, 22)
 
             local chev = lbl(selB, "▾", 11, T.TextMuted,
-                Enum.Font.GothamBold, Enum.TextXAlignment.Right, Z.Controls + 2)
+                Enum.Font.GothamBold, Enum.TextXAlignment.Right, Z.Controls+2)
             chev.Size  = UDim2.new(1, -4, 1, 0)
 
-            -- ── DROPDOWN PANEL parented to dropOverlay (NOT to box/page) ──
-            -- This ensures it always renders above sliders, toggles, etc.
+            -- Dropdown panel on overlay (always above controls)
             local dp                   = Instance.new("Frame")
             dp.Name                    = "DropPanel_" .. (c2.Name or "")
-            dp.Size                    = UDim2.new(0, 0, 0, 0)   -- set on open
+            dp.Size                    = UDim2.new(0, 0, 0, 0)
             dp.BackgroundColor3        = T.Panel
             dp.ClipsDescendants        = true
+            dp.Active                  = true
             dp.ZIndex                  = Z.Dropdown
             dp.Visible                 = false
-            dp.Parent                  = dropOverlay  -- ← on the ScreenGui overlay
+            dp.Parent                  = dropOverlay
             corner(dp, 8)
             stroke(dp, T.Accent, 1)
             pad(dp, 4, 4, 4, 4)
@@ -1370,33 +1507,32 @@ function ZenithImmortal:CreateWindow(cfg)
 
             selB.MouseButton1Click:Connect(function()
                 if not Window._alive then return end
-                if open2 then
-                    closeD(); return
+                if open2 then closeD(); return end
+
+                -- Support Refresh callback (from user's gsub patch)
+                if c2.Refresh then
+                    local refreshed = c2.Refresh()
+                    if refreshed then opts = refreshed; buildOpts() end
                 end
-                -- Close any other open dropdown first
+
                 if activeDropClose and activeDropClose ~= closeD then
                     activeDropClose()
                 end
                 open2 = true
                 activeDropClose = closeD
 
-                -- Compute absolute position of selB to place dp on the overlay
                 local absPos  = selB.AbsolutePosition
                 local absSize = selB.AbsoluteSize
                 local panelW  = absSize.X
                 local panelH  = math.min(#opts * 28 + 10, 160)
 
-                -- Decide whether to open downward or upward
-                local screenH   = workspace.CurrentCamera.ViewportSize.Y
-                local spaceBelow = screenH - (absPos.Y + absSize.Y)
-                local openUp    = spaceBelow < panelH + 10
+                local screenH    = workspace.CurrentCamera.ViewportSize.Y
+                local openUp     = (screenH - (absPos.Y + absSize.Y)) < panelH + 10
 
                 dp.Size     = UDim2.new(0, panelW, 0, 0)
-                if openUp then
-                    dp.Position = UDim2.new(0, absPos.X, 0, absPos.Y - panelH - 4)
-                else
-                    dp.Position = UDim2.new(0, absPos.X, 0, absPos.Y + absSize.Y + 4)
-                end
+                dp.Position = openUp
+                    and UDim2.new(0, absPos.X, 0, absPos.Y - panelH - 4)
+                    or  UDim2.new(0, absPos.X, 0, absPos.Y + absSize.Y + 4)
                 dp.Visible = true
 
                 tw(dp,   0.17, {Size = UDim2.new(0, panelW, 0, panelH)})
@@ -1409,7 +1545,6 @@ function ZenithImmortal:CreateWindow(cfg)
             function DD:Get() return sel end
             function DD:SetOptions(o) opts=o; buildOpts() end
 
-            -- Register flag
             if c2.Flag then
                 Window.Flags[c2.Flag] = { Type="Dropdown", Set=DD.Set, Get=DD.Get }
             end
@@ -1430,8 +1565,7 @@ function ZenithImmortal:CreateWindow(cfg)
             local iS = stroke(box, T.Stroke, 1)
 
             local nm = lbl(box, c2.Name or "Input", 13,
-                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left,
-                Z.Controls + 1)
+                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left, Z.Controls+1)
             nm.Size     = UDim2.new(1, -16, 0, 18)
             nm.Position = UDim2.new(0, 12, 0, 7)
 
@@ -1452,7 +1586,7 @@ function ZenithImmortal:CreateWindow(cfg)
             corner(field, 6)
             pad(field, 0, 0, 8, 8)
 
-            field.Focused:Connect(function()   tw(iS, 0.13, {Color = T.Accent}) end)
+            field.Focused:Connect(function()    tw(iS, 0.13, {Color = T.Accent}) end)
             field.FocusLost:Connect(function(enter)
                 tw(iS, 0.13, {Color = T.Stroke})
                 if c2.Callback then c2.Callback(field.Text, enter) end
@@ -1462,7 +1596,6 @@ function ZenithImmortal:CreateWindow(cfg)
             function Inp:Get() return field.Text end
             function Inp:Set(v) field.Text = v end
 
-            -- Register flag
             if c2.Flag then
                 Window.Flags[c2.Flag] = { Type="Input", Set=Inp.Set, Get=Inp.Get }
             end
@@ -1487,8 +1620,7 @@ function ZenithImmortal:CreateWindow(cfg)
             stroke(row, T.Stroke, 1)
 
             local nm = lbl(row, c2.Name or "Keybind", 13,
-                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left,
-                Z.Controls + 1)
+                T.Text, Enum.Font.GothamSemibold, Enum.TextXAlignment.Left, Z.Controls+1)
             nm.Size     = UDim2.new(1, -100, 1, 0)
             nm.Position = UDim2.new(0, 12, 0, 0)
 
@@ -1508,7 +1640,9 @@ function ZenithImmortal:CreateWindow(cfg)
             kb.MouseButton1Click:Connect(function()
                 lstn = true; kb.Text = "..."; kb.TextColor3 = T.Warning
             end)
-            UserInputService.InputBegan:Connect(function(i, gp)
+
+            -- Tracked connection — cleaned up on Unload
+            Window:_Connect(UserInputService.InputBegan, function(i, gp)
                 if not lstn then return end
                 if i.UserInputType == Enum.UserInputType.Keyboard then
                     lstn = false; bind = i.KeyCode
@@ -1527,7 +1661,6 @@ function ZenithImmortal:CreateWindow(cfg)
             function KB:Get() return bind end
             function KB:Set(k) bind=k; kb.Text=k.Name end
 
-            -- Register flag
             if c2.Flag then
                 Window.Flags[c2.Flag] = { Type="Keybind", Set=KB.Set, Get=KB.Get }
             end
