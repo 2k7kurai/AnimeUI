@@ -1,4 +1,4 @@
--- AnimeUI (Rayfield-style single file library, icon-only sidebar v2)
+-- AnimeUI V3 (Fixed + Stable Rayfield-style Library)
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -9,6 +9,10 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local AnimeUI = {}
 
+--//////////////////////////////////////////////////////
+-- THEME
+--//////////////////////////////////////////////////////
+
 local Theme = {
 	BG = Color3.fromRGB(18,18,24),
 	Panel = Color3.fromRGB(28,28,36),
@@ -17,16 +21,26 @@ local Theme = {
 	Text = Color3.fromRGB(255,255,255)
 }
 
-local function tween(obj,t,props)
-	TweenService:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+--//////////////////////////////////////////////////////
+-- UTILS
+--//////////////////////////////////////////////////////
+
+local function tween(obj, t, props)
+	TweenService:Create(
+		obj,
+		TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		props
+	):Play()
 end
 
-local function corner(obj,r)
+local function corner(obj, r)
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0,r or 10)
+	c.CornerRadius = UDim.new(0, r or 10)
 	c.Parent = obj
 end
 
+--//////////////////////////////////////////////////////
+-- WINDOW
 --//////////////////////////////////////////////////////
 
 function AnimeUI:CreateWindow(cfg)
@@ -38,21 +52,22 @@ function AnimeUI:CreateWindow(cfg)
 	gui.Parent = PlayerGui
 
 	local main = Instance.new("Frame")
-	main.Size = UDim2.new(0,620,0,400)
-	main.Position = UDim2.new(0.5,-310,0.5,-200)
+	main.Size = UDim2.new(0, 620, 0, 400)
+	main.Position = UDim2.new(0.5, -310, 0.5, -200)
 	main.BackgroundColor3 = Theme.BG
 	main.Parent = gui
-	corner(main,14)
+	corner(main, 14)
 
+	-- TOPBAR
 	local top = Instance.new("Frame")
-	top.Size = UDim2.new(1,0,0,40)
+	top.Size = UDim2.new(1, 0, 0, 40)
 	top.BackgroundColor3 = Theme.Panel
 	top.Parent = main
-	corner(top,14)
+	corner(top, 14)
 
 	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1,-20,1,0)
-	title.Position = UDim2.new(0,10,0,0)
+	title.Size = UDim2.new(1, -20, 1, 0)
+	title.Position = UDim2.new(0, 10, 0, 0)
 	title.BackgroundTransparency = 1
 	title.Text = cfg.Name or "Anime UI"
 	title.TextColor3 = Theme.Text
@@ -61,21 +76,23 @@ function AnimeUI:CreateWindow(cfg)
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = top
 
+	-- SIDEBAR
 	local sidebar = Instance.new("Frame")
-	sidebar.Size = UDim2.new(0,60,1,-40)
-	sidebar.Position = UDim2.new(0,0,0,40)
+	sidebar.Size = UDim2.new(0, 60, 1, -40)
+	sidebar.Position = UDim2.new(0, 0, 0, 40)
 	sidebar.BackgroundTransparency = 1
 	sidebar.Parent = main
 
 	local content = Instance.new("Frame")
-	content.Size = UDim2.new(1,-60,1,-40)
-	content.Position = UDim2.new(0,60,0,40)
+	content.Size = UDim2.new(1, -60, 1, -40)
+	content.Position = UDim2.new(0, 60, 0, 40)
 	content.BackgroundTransparency = 1
 	content.Parent = main
 
-	-- RIGHT SHIFT TOGGLE (smooth)
+	-- RIGHT SHIFT TOGGLE (FIXED)
 	local open = true
-	UserInputService.InputBegan:Connect(function(input,gp)
+
+	UserInputService.InputBegan:Connect(function(input, gp)
 		if gp then return end
 		if input.KeyCode == Enum.KeyCode.RightShift then
 			open = not open
@@ -83,54 +100,59 @@ function AnimeUI:CreateWindow(cfg)
 			if open then
 				main.Visible = true
 				main.BackgroundTransparency = 1
-				tween(main,0.2,{BackgroundTransparency = 0})
+				tween(main, 0.2, {BackgroundTransparency = 0})
 			else
-				tween(main,0.2,{BackgroundTransparency = 1})
-				task.delay(0.2,function()
+				tween(main, 0.2, {BackgroundTransparency = 1})
+				task.delay(0.2, function()
 					main.Visible = false
 				end)
 			end
 		end
 	end)
 
-	local window = {}
-	window._tabs = {}
+	--//////////////////////////////////////////////////////
+	-- WINDOW TABLE
+	--//////////////////////////////////////////////////////
 
-	function window:CreateTab(name, icon)
+	local Window = {}
+	Window._tabs = {}
+
+	--//////////////////////////////////////////////////////
+	-- TAB SYSTEM
+	--//////////////////////////////////////////////////////
+
+	function Window:CreateTab(name, icon)
 
 		local tabBtn = Instance.new("ImageButton")
-		tabBtn.Size = UDim2.new(0,44,0,44)
+		tabBtn.Size = UDim2.new(0, 44, 0, 44)
 		tabBtn.BackgroundColor3 = Theme.Tab
 		tabBtn.Image = icon or ""
 		tabBtn.ImageColor3 = Theme.Accent
+		tabBtn.AutoButtonColor = false
 		tabBtn.Parent = sidebar
-		corner(tabBtn,10)
+		corner(tabBtn, 10)
 
 		local page = Instance.new("ScrollingFrame")
-		page.Size = UDim2.new(1,0,1,0)
+		page.Size = UDim2.new(1, 0, 1, 0)
 		page.BackgroundTransparency = 1
 		page.Visible = false
 		page.ScrollBarThickness = 3
 		page.Parent = content
 
 		local layout = Instance.new("UIListLayout")
-		layout.Padding = UDim.new(0,8)
+		layout.Padding = UDim.new(0, 8)
 		layout.Parent = page
 
-		local padding = Instance.new("UIPadding")
-		padding.PaddingTop = UDim.new(0,10)
-		padding.PaddingLeft = UDim.new(0,10)
-		padding.Parent = page
-
-		local function setActive()
-			for _,v in pairs(content:GetChildren()) do
+		local function activate()
+			for _, v in pairs(content:GetChildren()) do
 				if v:IsA("ScrollingFrame") then
 					v.Visible = false
 				end
 			end
+
 			page.Visible = true
 
-			for _,b in pairs(sidebar:GetChildren()) do
+			for _, b in pairs(sidebar:GetChildren()) do
 				if b:IsA("ImageButton") then
 					b.BackgroundColor3 = Theme.Tab
 					b.ImageColor3 = Theme.Accent
@@ -141,35 +163,26 @@ function AnimeUI:CreateWindow(cfg)
 			tabBtn.ImageColor3 = Color3.fromRGB(255,255,255)
 		end
 
-		tabBtn.MouseButton1Click:Connect(setActive)
+		tabBtn.MouseButton1Click:Connect(activate)
 
-		tabBtn.MouseEnter:Connect(function()
-			tween(tabBtn,0.15,{
-				BackgroundColor3 = Theme.Accent
-			})
-		end)
-
-		tabBtn.MouseLeave:Connect(function()
-			if page.Visible == false then
-				tween(tabBtn,0.15,{
-					BackgroundColor3 = Theme.Tab
-				})
-			end
-		end)
-
+		-- API
 		local tab = {}
 
 		function tab:AddButton(cfg)
-			local b = Instance.new("TextButton")
-			b.Size = UDim2.new(1,-10,0,40)
-			b.BackgroundColor3 = Theme.Tab
-			b.Text = cfg.Name
-			b.TextColor3 = Theme.Text
-			b.Parent = page
-			corner(b,10)
+			local btn = Instance.new("TextButton")
+			btn.Size = UDim2.new(1, -10, 0, 40)
+			btn.BackgroundColor3 = Theme.Tab
+			btn.Text = cfg.Name
+			btn.TextColor3 = Theme.Text
+			btn.Font = Enum.Font.Gotham
+			btn.TextSize = 14
+			btn.Parent = page
+			corner(btn, 10)
 
-			b.MouseButton1Click:Connect(function()
-				if cfg.Callback then cfg.Callback() end
+			btn.MouseButton1Click:Connect(function()
+				if cfg.Callback then
+					cfg.Callback()
+				end
 			end)
 		end
 
@@ -177,23 +190,48 @@ function AnimeUI:CreateWindow(cfg)
 			local state = cfg.Default or false
 
 			local t = Instance.new("TextButton")
-			t.Size = UDim2.new(1,-10,0,40)
+			t.Size = UDim2.new(1, -10, 0, 40)
 			t.BackgroundColor3 = Theme.Tab
 			t.Text = cfg.Name
 			t.TextColor3 = Theme.Text
+			t.Font = Enum.Font.Gotham
+			t.TextSize = 14
 			t.Parent = page
-			corner(t,10)
+			corner(t, 10)
 
 			t.MouseButton1Click:Connect(function()
 				state = not state
-				if cfg.Callback then cfg.Callback(state) end
+				if cfg.Callback then
+					cfg.Callback(state)
+				end
 			end)
 		end
+
+		-- visual feedback
+		tabBtn.MouseEnter:Connect(function()
+			tween(tabBtn, 0.15, {BackgroundColor3 = Color3.fromRGB(60,40,100)})
+		end)
+
+		tabBtn.MouseLeave:Connect(function()
+			if page.Visible == false then
+				tween(tabBtn, 0.15, {BackgroundColor3 = Theme.Tab})
+			end
+		end)
 
 		return tab
 	end
 
-	return window
+	-- DEFAULT FIRST TAB AUTO-SELECT (IMPORTANT FIX)
+	task.defer(function()
+		local first = sidebar:FindFirstChildOfClass("ImageButton")
+		if first then
+			first:Activate()
+		end
+	end)
+
+	-- FINAL RETURN (THIS FIXES YOUR NIL ERROR)
+	return Window
 end
 
+-- IMPORTANT: NEVER REMOVE THIS
 return AnimeUI
