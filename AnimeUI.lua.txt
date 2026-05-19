@@ -202,9 +202,11 @@ function ZenithImmortal:CreateWindow(cfg)
 
     ----------------------------------------------------------------
     -- TOPBAR
-    -- Also clipped by main, so its top corners are automatically rounded.
-    -- We still add corner() so its OWN background colour rounds correctly
-    -- at the top-left / top-right.
+    -- main has ClipsDescendants=true so its UICorner clips topbar's
+    -- top corners automatically — no corner() needed on topbar itself.
+    -- NOT adding corner() here avoids the "floating rounded rectangle"
+    -- artefact where the topbar's own rounded bottom corners bled into
+    -- the content area below.
     ----------------------------------------------------------------
     local topbar                      = Instance.new("Frame")
     topbar.Name                       = "Topbar"
@@ -213,11 +215,9 @@ function ZenithImmortal:CreateWindow(cfg)
     topbar.BackgroundTransparency     = 0.06
     topbar.ZIndex                     = 20
     topbar.Parent                     = main
-    -- Round all 4 corners at RADIUS — the bottom two corners will be hidden
-    -- beneath the content area, and the top two match the main frame's curve.
-    corner(topbar, RADIUS)
+    -- (no corner call — main's ClipsDescendants handles the visible rounded top)
 
-    -- Thin accent line at the very bottom of topbar
+    -- Thin animated accent line at the very bottom of topbar
     local accentBar                   = Instance.new("Frame")
     accentBar.Size                    = UDim2.new(1, 0, 0, 2)
     accentBar.Position                = UDim2.new(0, 0, 1, -2)
@@ -235,7 +235,6 @@ function ZenithImmortal:CreateWindow(cfg)
     })
     accentG.Parent = accentBar
 
-    -- Animate gradient scrolling left → right
     task.spawn(function()
         local off = 0
         while gui.Parent do
@@ -245,30 +244,62 @@ function ZenithImmortal:CreateWindow(cfg)
         end
     end)
 
-    -- Purple dot before title
-    local dot              = Instance.new("Frame")
-    dot.Size               = UDim2.new(0, 8, 0, 8)
-    dot.Position           = UDim2.new(0, 16, 0.5, -4)
-    dot.BackgroundColor3   = T.Accent
-    dot.ZIndex             = 22
-    dot.Parent             = topbar
-    corner(dot, 4)
+    ----------------------------------------------------------------
+    -- PURCHASE BUTTON  (left side of topbar)
+    ----------------------------------------------------------------
+    local purchaseBtn                  = Instance.new("TextButton")
+    purchaseBtn.Size                   = UDim2.new(0, 162, 0, 30)
+    purchaseBtn.Position               = UDim2.new(0, 10, 0.5, -15)
+    purchaseBtn.BackgroundColor3       = T.AccentDim
+    purchaseBtn.Text                   = "Purchase In Discord"
+    purchaseBtn.TextColor3             = T.Text
+    purchaseBtn.Font                   = Enum.Font.GothamSemibold
+    purchaseBtn.TextSize               = 12
+    purchaseBtn.AutoButtonColor        = false
+    purchaseBtn.ZIndex                 = 22
+    purchaseBtn.Parent                 = topbar
+    corner(purchaseBtn, 8)
+    local pS = stroke(purchaseBtn, T.Accent, 1)
 
-    -- Title
+    purchaseBtn.MouseEnter:Connect(function()
+        tw(purchaseBtn, 0.13, {BackgroundColor3 = T.Accent})
+        tw(pS, 0.13, {Color = T.AccentGlow})
+    end)
+    purchaseBtn.MouseLeave:Connect(function()
+        tw(purchaseBtn, 0.13, {BackgroundColor3 = T.AccentDim})
+        tw(pS, 0.13, {Color = T.Accent})
+    end)
+    purchaseBtn.MouseButton1Click:Connect(function()
+        pcall(function() setclipboard("https://discord.com/invite/7k2") end)
+        purchaseBtn.Text = "Copied To Clipboard"
+        tw(purchaseBtn, 0.1, {BackgroundColor3 = T.Success})
+        task.delay(1.5, function()
+            purchaseBtn.Text = "Purchase In Discord"
+            tw(purchaseBtn, 0.2, {BackgroundColor3 = T.AccentDim})
+        end)
+    end)
+
+    ----------------------------------------------------------------
+    -- TITLE  (perfectly centered across the full topbar width)
+    ----------------------------------------------------------------
     local titleLbl = lbl(topbar, cfg.Name or "Zenith Immortal",
-        15, T.Text, Enum.Font.GothamBold, Enum.TextXAlignment.Left, 22)
-    titleLbl.Size     = UDim2.new(0, 260, 1, 0)
-    titleLbl.Position = UDim2.new(0, 34, 0, 0)
+        15, T.Text, Enum.Font.GothamBold, Enum.TextXAlignment.Center, 22)
+    titleLbl.Size        = UDim2.new(1, 0, 1, 0)
+    titleLbl.Position    = UDim2.new(0, 0, 0, 0)
+    titleLbl.AnchorPoint = Vector2.new(0, 0)
+    -- pointer-events passthrough so dragging still works on the title area
+    titleLbl.ZIndex      = 21   -- below buttons so click goes through to topbar
 
-    -- Rainbow discord link (replaces version/subtitle)
+    ----------------------------------------------------------------
+    -- RAINBOW DISCORD LABEL  (right side, inside topbar)
+    ----------------------------------------------------------------
     if cfg.Discord then
         local discLbl = lbl(topbar, cfg.Discord,
             11, T.Text, Enum.Font.GothamBold, Enum.TextXAlignment.Right, 22)
         discLbl.Size     = UDim2.new(1, -100, 1, 0)
         discLbl.Position = UDim2.new(0, 0, 0, 0)
-        pad(discLbl, 0, 0, 0, 46)   -- keep clear of close button
+        pad(discLbl, 0, 0, 0, 46)
 
-        -- Rainbow hue shift loop
         task.spawn(function()
             local hue = 0
             while discLbl.Parent do
@@ -279,7 +310,9 @@ function ZenithImmortal:CreateWindow(cfg)
         end)
     end
 
-    -- Close button
+    ----------------------------------------------------------------
+    -- CLOSE BUTTON  (top-right of topbar)
+    ----------------------------------------------------------------
     local closeBtn                = Instance.new("TextButton")
     closeBtn.Size                 = UDim2.new(0, 28, 0, 28)
     closeBtn.Position             = UDim2.new(1, -38, 0.5, -14)
@@ -316,8 +349,9 @@ function ZenithImmortal:CreateWindow(cfg)
     sidebar.ClipsDescendants          = false -- tooltips need to overflow
     sidebar.ZIndex                    = 15
     sidebar.Parent                    = main
-    -- Bottom-left corner matches main's radius
-    corner(sidebar, RADIUS)
+    -- NO corner() — main's ClipsDescendants+UICorner clips the bottom-left
+    -- cleanly. Adding UICorner here caused visible rounded bumps on the
+    -- sidebar's top-right and bottom-right inner edges.
 
     -- Thin right-edge separator line
     local sbLine                      = Instance.new("Frame")
@@ -665,6 +699,11 @@ function ZenithImmortal:CreateWindow(cfg)
             btn.MouseButton1Click:Connect(function()
                 tw(btn, 0.06, {BackgroundColor3 = T.AccentDim})
                 task.delay(0.06, function() tw(btn, 0.14, {BackgroundColor3 = T.CardHover}) end)
+                Window:Notify({
+                    Title   = c2.Name or "Button",
+                    Content = c2.Description or "Action triggered.",
+                    Duration = 2,
+                })
                 if c2.Callback then c2.Callback() end
             end)
         end
@@ -729,6 +768,12 @@ function ZenithImmortal:CreateWindow(cfg)
 
             row.MouseButton1Click:Connect(function()
                 state = not state; refresh()
+                Window:Notify({
+                    Title   = (c2.Name or "Toggle") .. (state and " Enabled" or " Disabled"),
+                    Content = c2.Description or "",
+                    Type    = state and "success" or "default",
+                    Duration = 2,
+                })
                 if c2.Callback then c2.Callback(state) end
             end)
             row.MouseEnter:Connect(function() tw(row, 0.12, {BackgroundColor3 = T.CardHover}) end)
@@ -769,19 +814,24 @@ function ZenithImmortal:CreateWindow(cfg)
             vLbl.Position = UDim2.new(1, -66, 0, 8)
 
             local track               = Instance.new("Frame")
-            track.Size                = UDim2.new(1, -24, 0, 4)
-            track.Position            = UDim2.new(0, 12, 0, 40)
+            track.Size                = UDim2.new(1, -24, 0, 6)
+            track.Position            = UDim2.new(0, 12, 0, 38)
             track.BackgroundColor3    = T.CardHover
             track.ZIndex              = 13
             track.Parent              = box
-            corner(track, 2)
+            -- PILL shape: UDim.new(1,0) makes radius = 50% of height = full pill
+            local trackCorner         = Instance.new("UICorner")
+            trackCorner.CornerRadius  = UDim.new(1, 0)
+            trackCorner.Parent        = track
 
             local fill                = Instance.new("Frame")
             fill.Size                 = UDim2.new((value-minV)/(maxV-minV), 0, 1, 0)
             fill.BackgroundColor3     = T.Accent
             fill.ZIndex               = 14
             fill.Parent               = track
-            corner(fill, 2)
+            local fillCorner          = Instance.new("UICorner")
+            fillCorner.CornerRadius   = UDim.new(1, 0)
+            fillCorner.Parent         = fill
             local fg = Instance.new("UIGradient")
             fg.Color = ColorSequence.new(T.AccentDim, T.AccentGlow)
             fg.Parent = fill
@@ -824,8 +874,15 @@ function ZenithImmortal:CreateWindow(cfg)
                 end
             end)
             UserInputService.InputEnded:Connect(function(i)
-                if i.UserInputType == Enum.UserInputType.MouseButton1 then
+                if i.UserInputType == Enum.UserInputType.MouseButton1 and drag then
                     drag = false; glow(false)
+                    -- notify on release so it fires once, not every pixel
+                    Window:Notify({
+                        Title   = c2.Name or "Slider",
+                        Content = "Set to " .. tostring(value) .. suf,
+                        Type    = "default",
+                        Duration = 2,
+                    })
                 end
             end)
 
@@ -934,6 +991,11 @@ function ZenithImmortal:CreateWindow(cfg)
                     ob.MouseButton1Click:Connect(function()
                         sel = opt; selB.Text = opt
                         closeD(); buildOpts()
+                        Window:Notify({
+                            Title   = c2.Name or "Dropdown",
+                            Content = "Selected: " .. opt,
+                            Duration = 2,
+                        })
                         if c2.Callback then c2.Callback(opt) end
                     end)
                 end
@@ -1047,6 +1109,11 @@ function ZenithImmortal:CreateWindow(cfg)
                 if i.UserInputType == Enum.UserInputType.Keyboard then
                     lstn = false; bind = i.KeyCode
                     kb.Text = bind.Name; kb.TextColor3 = T.Accent
+                    Window:Notify({
+                        Title   = c2.Name or "Keybind",
+                        Content = "Bound to " .. bind.Name,
+                        Duration = 2,
+                    })
                     if c2.Callback then c2.Callback(bind) end
                 end
             end)
