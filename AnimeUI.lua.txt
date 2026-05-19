@@ -244,6 +244,9 @@ function ZenithImmortal:CreateWindow(cfg)
     topbar.BackgroundTransparency      = 0.06
     topbar.ZIndex                      = Z.Topbar
     topbar.Parent                      = main
+    -- Explicitly round top corners to match main frame.
+    -- Bottom corners are hidden beneath the sidebar/content, so they're invisible.
+    corner(topbar, RADIUS)
 
     -- Animated gradient accent line (bottom of topbar)
     local accentBar                    = Instance.new("Frame")
@@ -375,7 +378,10 @@ function ZenithImmortal:CreateWindow(cfg)
     sidebar.ClipsDescendants           = false  -- tooltips must overflow
     sidebar.ZIndex                     = Z.Sidebar
     sidebar.Parent                     = main
-    -- NO UICorner — main's ClipsDescendants handles bottom-left rounding
+    -- Round all corners — inner ones (top-right, bottom-right) are hidden
+    -- behind the topbar and content area respectively, so only the visible
+    -- bottom-left corner shows as rounded, matching the main frame.
+    corner(sidebar, RADIUS)
 
     local sbLine                       = Instance.new("Frame")
     sbLine.Size                        = UDim2.new(0, 1, 1, 0)
@@ -454,6 +460,51 @@ function ZenithImmortal:CreateWindow(cfg)
     notifList.Padding                  = UDim.new(0, 8)
     notifList.SortOrder                = Enum.SortOrder.LayoutOrder
     notifList.Parent                   = notifHolder
+
+    ------------------------------------------------------------------
+    -- TOOLTIP OVERLAY  (on gui, ZIndex 600 — always above everything)
+    -- One shared tooltip frame repositioned per-button on hover.
+    -- Parented to gui, NOT to main/sidebar, so it is NEVER clipped by
+    -- the content area or the scrolling page.
+    ------------------------------------------------------------------
+    local tooltipOverlay               = Instance.new("Frame")
+    tooltipOverlay.Name                = "TooltipOverlay"
+    tooltipOverlay.Size                = UDim2.new(1, 0, 1, 0)
+    tooltipOverlay.BackgroundTransparency = 1
+    tooltipOverlay.ZIndex              = Z.Tooltip
+    tooltipOverlay.Parent              = gui
+
+    local sharedTip                    = Instance.new("Frame")
+    sharedTip.Name                     = "Tooltip"
+    sharedTip.Size                     = UDim2.new(0, 10, 0, 26)  -- width set dynamically
+    sharedTip.BackgroundColor3         = T.Card
+    sharedTip.BackgroundTransparency   = 0.05
+    sharedTip.Visible                  = false
+    sharedTip.ZIndex                   = Z.Tooltip
+    sharedTip.Parent                   = tooltipOverlay
+    corner(sharedTip, 6)
+    stroke(sharedTip, T.Accent, 1)
+
+    local sharedTipL = lbl(sharedTip, "", 11, T.Text,
+        Enum.Font.GothamSemibold, Enum.TextXAlignment.Center, Z.Tooltip + 1)
+    sharedTipL.Size = UDim2.new(1, 0, 1, 0)
+    pad(sharedTip, 0, 0, 8, 8)
+
+    -- TextService for measuring tooltip width
+    local TextService = game:GetService("TextService")
+    local function showTip(btnFrame, label)
+        sharedTipL.Text = label
+        local tw2 = TextService:GetTextSize(
+            label, 11, Enum.Font.GothamSemibold, Vector2.new(400, 26)).X + 18
+        sharedTip.Size = UDim2.new(0, tw2, 0, 26)
+        local abs = btnFrame.AbsolutePosition
+        local sz  = btnFrame.AbsoluteSize
+        sharedTip.Position = UDim2.new(0, abs.X + sz.X + 8, 0, abs.Y + sz.Y/2 - 13)
+        sharedTip.Visible  = true
+    end
+    local function hideTip()
+        sharedTip.Visible = false
+    end
 
     ------------------------------------------------------------------
     -- SHOW / HIDE  (RightShift)
@@ -708,6 +759,26 @@ function ZenithImmortal:CreateWindow(cfg)
     -- BUILD CONFIG UI  (call with a Tab object)
     ------------------------------------------------------------------
     function Window:BuildConfigUI(tab)
+
+        tab:AddSection("Existing Configs")
+
+        -- Dropdown that lists saved configs — refreshed dynamically
+        local configDD = tab:AddDropdown({
+            Name    = "Select Config",
+            Options = self:ListConfigs(),
+            Default = "(none)",
+        })
+
+        tab:AddButton({ Name = "⟳  Refresh List", Callback = function()
+            local list = self:ListConfigs()
+            if #list == 0 then list = {"(none)"} end
+            configDD:SetOptions(list)
+            configDD:Set(list[1])
+            self:Notify({ Title="Config List", Content="Refreshed ("..#list.." found).", Duration=2 })
+        end })
+
+        tab:AddSection("New Config Name")
+
         local nameInput = tab:AddInput({
             Name        = "Config Name",
             Placeholder = "my_config",
@@ -716,19 +787,36 @@ function ZenithImmortal:CreateWindow(cfg)
         tab:AddSection("Actions")
 
         tab:AddButton({ Name = "Save Config", Callback = function()
-            self:SaveConfig(nameInput:Get())
+            local n = nameInput:Get()
+            if n == "" then n = configDD:Get() end
+            self:SaveConfig(n)
+            -- Refresh dropdown after saving
+            local list = self:ListConfigs()
+            if #list > 0 then configDD:SetOptions(list) end
         end })
 
         tab:AddButton({ Name = "Load Config", Callback = function()
-            self:LoadConfig(nameInput:Get())
+            -- Prefer the dropdown selection; fall back to typed name
+            local sel = configDD:Get()
+            if sel == "" or sel == "(none)" then sel = nameInput:Get() end
+            self:LoadConfig(sel)
         end })
 
         tab:AddButton({ Name = "Delete Config", Callback = function()
-            self:DeleteConfig(nameInput:Get())
+            local sel = configDD:Get()
+            if sel == "" or sel == "(none)" then sel = nameInput:Get() end
+            self:DeleteConfig(sel)
+            -- Refresh dropdown after deletion
+            local list = self:ListConfigs()
+            if #list == 0 then list = {"(none)"} end
+            configDD:SetOptions(list)
+            configDD:Set(list[1])
         end })
 
         tab:AddButton({ Name = "Export Config (Clipboard)", Callback = function()
-            self:ExportConfig(nameInput:Get())
+            local sel = configDD:Get()
+            if sel == "" or sel == "(none)" then sel = nameInput:Get() end
+            self:ExportConfig(sel)
         end })
 
         tab:AddSection("Import")
@@ -738,10 +826,14 @@ function ZenithImmortal:CreateWindow(cfg)
             Placeholder = "Paste config JSON here...",
         })
         tab:AddButton({ Name = "Import Config", Callback = function()
-            self:ImportConfig(importInput:Get(), nameInput:Get())
+            local n = nameInput:Get()
+            if n == "" then n = "imported" end
+            self:ImportConfig(importInput:Get(), n)
+            local list = self:ListConfigs()
+            if #list > 0 then configDD:SetOptions(list) end
         end })
 
-        tab:AddSection("Unload")
+        tab:AddSection("System")
 
         tab:AddButton({ Name = "Unload UI", Callback = function()
             self:Unload()
@@ -774,19 +866,8 @@ function ZenithImmortal:CreateWindow(cfg)
         corner(tabBtn, 10)
         local tabS = stroke(tabBtn, T.Stroke, 1.5)
 
-        -- Tooltip (floats right, above everything in sidebar)
-        local tip                      = Instance.new("Frame")
-        tip.Size                       = UDim2.new(0, 90, 0, 26)
-        tip.Position                   = UDim2.new(1, 8, 0.5, -13)
-        tip.BackgroundColor3           = T.Card
-        tip.Visible                    = false
-        tip.ZIndex                     = Z.Tooltip
-        tip.Parent                     = tabBtn
-        corner(tip, 6)
-        stroke(tip, T.Accent, 1)
-        local tipL = lbl(tip, name, 11, T.Text,
-            Enum.Font.GothamSemibold, Enum.TextXAlignment.Center, Z.Tooltip+1)
-        tipL.Size = UDim2.new(1, 0, 1, 0)
+        -- Tooltip (now rendered on the gui overlay layer, never clipped by content)
+        -- showTip/hideTip are defined outside CreateTab in the window scope.
 
         --------------------------------------------------------
         -- SCROLLING PAGE
@@ -833,13 +914,13 @@ function ZenithImmortal:CreateWindow(cfg)
 
         tabBtn.MouseButton1Click:Connect(activate)
         tabBtn.MouseEnter:Connect(function()
-            tip.Visible = true
+            showTip(tabBtn, name)   -- shared overlay tooltip, never clipped
             if Window._active ~= name then
                 tw(tabBtn, 0.12, {BackgroundColor3 = T.CardHover, ImageTransparency = 0.08})
             end
         end)
         tabBtn.MouseLeave:Connect(function()
-            tip.Visible = false
+            hideTip()
             if Window._active ~= name then
                 tw(tabBtn, 0.12, {BackgroundColor3 = T.Card, ImageTransparency = 0.2})
             end
