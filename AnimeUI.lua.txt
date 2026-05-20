@@ -965,12 +965,8 @@ function ZenithImmortal:CreateWindow(cfg)
             if #list > 0 then configDD:SetOptions(list) end
         end })
 
-        tab:AddSection("System")
-        tab:AddButton({ Name="Unload UI", Callback=function() self:Unload() end })
+        -- (Unload is handled by the main script's Settings tab)
     end
-
-    ------------------------------------------------------------------
-    -- BUILD SETTINGS UI  (persistent — survives between sessions)
     ------------------------------------------------------------------
     function Window:BuildSettingsUI(tab)
         tab:AddSection("Background")
@@ -1043,12 +1039,8 @@ function ZenithImmortal:CreateWindow(cfg)
             end,
         })
 
-        tab:AddSection("System")
-        tab:AddButton({ Name="Unload UI", Callback=function() self:Unload() end })
+        -- (Unload handled by SettingsTab in main script)
     end
-
-    ------------------------------------------------------------------
-    -- CREATE TAB
     ------------------------------------------------------------------
     function Window:CreateTab(name, iconId)
         if not self._alive then return {} end
