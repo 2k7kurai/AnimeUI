@@ -1464,15 +1464,21 @@ function ZenithImmortal:CreateWindow(cfg)
             chev.Size  = UDim2.new(1, -4, 1, 0)
 
             -- Dropdown panel on overlay (always above controls)
-            local dp                   = Instance.new("Frame")
-            dp.Name                    = "DropPanel_" .. (c2.Name or "")
-            dp.Size                    = UDim2.new(0, 0, 0, 0)
-            dp.BackgroundColor3        = T.Panel
-            dp.ClipsDescendants        = true
-            dp.Active                  = true
-            dp.ZIndex                  = Z.Dropdown
-            dp.Visible                 = false
-            dp.Parent                  = dropOverlay
+            local dp                          = Instance.new("ScrollingFrame")
+            dp.Name                           = "DropPanel_" .. (c2.Name or "")
+            dp.Size                           = UDim2.new(0, 0, 0, 0)
+            dp.BackgroundColor3               = T.Panel
+            dp.ClipsDescendants               = true
+            dp.Active                         = true
+            dp.ZIndex                         = Z.Dropdown
+            dp.Visible                        = false
+            dp.ScrollBarThickness             = 3
+            dp.ScrollBarImageColor3           = T.Accent
+            dp.ScrollBarImageTransparency     = 0.4
+            dp.CanvasSize                     = UDim2.new(0, 0, 0, 0)
+            dp.AutomaticCanvasSize            = Enum.AutomaticSize.Y
+            dp.ScrollingDirection             = Enum.ScrollingDirection.Y
+            dp.Parent                         = dropOverlay
             corner(dp, 8)
             stroke(dp, T.Accent, 1)
             pad(dp, 4, 4, 4, 4)
@@ -1549,13 +1555,14 @@ function ZenithImmortal:CreateWindow(cfg)
 
                 local absPos  = selB.AbsolutePosition
                 local absSize = selB.AbsoluteSize
-                local panelW  = absSize.X
-                local panelH  = math.min(#opts * 28 + 10, 160)
+                local panelW  = absSize.X + 6   -- +6 so scrollbar doesn't overlap options
+                local panelH  = math.min(#opts * 30 + 10, 200)  -- 200px visible, scrolls beyond
 
                 local screenH    = workspace.CurrentCamera.ViewportSize.Y
                 local openUp     = (screenH - (absPos.Y + absSize.Y)) < panelH + 10
 
                 dp.Size     = UDim2.new(0, panelW, 0, 0)
+                dp.CanvasPosition = Vector2.zero  -- scroll back to top on reopen
                 dp.Position = openUp
                     and UDim2.new(0, absPos.X, 0, absPos.Y - panelH - 4)
                     or  UDim2.new(0, absPos.X, 0, absPos.Y + absSize.Y + 4)
