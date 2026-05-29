@@ -424,15 +424,22 @@ function ZenithImmortal:CreateWindow(cfg)
         pickerPanel.Visible=true; pickerOpen=true
     end
 
-    -- Outside-click close — wired inside the library
+    -- Outside-click close — wired inside the library.
+    -- task.defer lets row MouseButton1Click fire first before we check
+    -- whether to close, so clicking a bottom row does not dismiss the
+    -- panel before the toggle registers.
     UserInputService.InputBegan:Connect(function(input)
         if not pickerOpen then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-        local mouse=UserInputService:GetMouseLocation()
-        local ap=pickerPanel.AbsolutePosition; local as=pickerPanel.AbsoluteSize
-        local inside = mouse.X>=ap.X and mouse.X<=ap.X+as.X
-                    and mouse.Y>=ap.Y and mouse.Y<=ap.Y+as.Y
-        if not inside then closePicker() end
+        local mouse = UserInputService:GetMouseLocation()
+        task.defer(function()
+            if not pickerOpen then return end
+            local ap = pickerPanel.AbsolutePosition
+            local as = pickerPanel.AbsoluteSize
+            local inside = mouse.X >= ap.X and mouse.X <= ap.X + as.X
+                        and mouse.Y >= ap.Y and mouse.Y <= ap.Y + as.Y
+            if not inside then closePicker() end
+        end)
     end)
 
     -- Expose picker API to CreateTab
