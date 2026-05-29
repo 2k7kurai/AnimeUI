@@ -413,15 +413,28 @@ function ZenithImmortal:CreateWindow(cfg)
     local function openPicker(anchorRow)
         if not pickerGetNames then return end
         rebuildPicker()
-        local ap=anchorRow.AbsolutePosition; local as=anchorRow.AbsoluteSize
-        local names=pickerGetNames()
-        local panelH=math.min(#names*30+8, 200)
-        local screenH=workspace.CurrentCamera.ViewportSize.Y
-        local posY=ap.Y+as.Y+4
-        if posY+panelH>screenH-10 then posY=ap.Y-panelH-4 end
-        pickerPanel.Position=UDim2.new(0,ap.X,0,posY)
-        pickerPanel.Size=UDim2.new(0,220,0,panelH)
-        pickerPanel.Visible=true; pickerOpen=true
+        local ap      = anchorRow.AbsolutePosition
+        local as      = anchorRow.AbsoluteSize
+        local names   = pickerGetNames()
+        local screenH = workspace.CurrentCamera.ViewportSize.Y
+        local ROW_PX  = 30
+        local PAD_PX  = 10
+        local spaceBelow = screenH - (ap.Y + as.Y + 4) - 10
+        local spaceAbove = ap.Y - 4 - 10
+        local idealH  = #names * ROW_PX + PAD_PX
+        local posY, panelH
+        if spaceBelow >= math.min(idealH, 120) or spaceBelow >= spaceAbove then
+            panelH = math.min(idealH, spaceBelow)
+            posY   = ap.Y + as.Y + 4
+        else
+            panelH = math.min(idealH, spaceAbove)
+            posY   = ap.Y - panelH - 4
+        end
+        panelH = math.max(panelH, ROW_PX + PAD_PX)
+        pickerPanel.Position = UDim2.new(0, ap.X, 0, posY)
+        pickerPanel.Size     = UDim2.new(0, 220, 0, panelH)
+        pickerPanel.Visible  = true
+        pickerOpen           = true
     end
 
     -- Outside-click close — wired inside the library.
