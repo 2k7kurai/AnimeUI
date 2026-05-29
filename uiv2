@@ -413,24 +413,16 @@ function ZenithImmortal:CreateWindow(cfg)
     local function openPicker(anchorRow)
         if not pickerGetNames then return end
         rebuildPicker()
-        local ap      = anchorRow.AbsolutePosition
-        local as      = anchorRow.AbsoluteSize
-        local names   = pickerGetNames()
+        local ap     = anchorRow.AbsolutePosition
+        local as     = anchorRow.AbsoluteSize
+        local names  = pickerGetNames()
+        local ROW_PX = 30
+        local PAD_PX = 10
+        local idealH = #names * ROW_PX + PAD_PX
+        local panelH = math.min(idealH, 200)
         local screenH = workspace.CurrentCamera.ViewportSize.Y
-        local ROW_PX  = 30
-        local PAD_PX  = 10
-        local spaceBelow = screenH - (ap.Y + as.Y + 4) - 10
-        local spaceAbove = ap.Y - 4 - 10
-        local idealH  = #names * ROW_PX + PAD_PX
-        local posY, panelH
-        if spaceBelow >= math.min(idealH, 120) or spaceBelow >= spaceAbove then
-            panelH = math.min(idealH, spaceBelow)
-            posY   = ap.Y + as.Y + 4
-        else
-            panelH = math.min(idealH, spaceAbove)
-            posY   = ap.Y - panelH - 4
-        end
-        panelH = math.max(panelH, ROW_PX + PAD_PX)
+        local posY = ap.Y + as.Y + 4
+        if posY + panelH > screenH - 10 then posY = ap.Y - panelH - 4 end
         pickerPanel.Position = UDim2.new(0, ap.X, 0, posY)
         pickerPanel.Size     = UDim2.new(0, 220, 0, panelH)
         pickerPanel.Visible  = true
@@ -449,8 +441,11 @@ function ZenithImmortal:CreateWindow(cfg)
             if not pickerOpen then return end
             local ap = pickerPanel.AbsolutePosition
             local as = pickerPanel.AbsoluteSize
+            -- Use the scroll canvas height so rows below the visible clip
+            -- boundary still count as "inside" for click detection.
+            local scrollH = math.max(as.Y, pickerScroll.AbsoluteCanvasSize.Y)
             local inside = mouse.X >= ap.X and mouse.X <= ap.X + as.X
-                        and mouse.Y >= ap.Y and mouse.Y <= ap.Y + as.Y
+                        and mouse.Y >= ap.Y and mouse.Y <= ap.Y + scrollH
             if not inside then closePicker() end
         end)
     end)
