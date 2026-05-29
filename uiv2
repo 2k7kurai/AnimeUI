@@ -758,14 +758,26 @@ function ZenithImmortal:CreateWindow(cfg)
 
         function Tab:AddSection(title,col)
             col=col or "Left"; local page=tabCols[col]
+
+            -- Outer box stacks its children (header + inner + spacer) via UIListLayout
+            -- so AutomaticSize.Y correctly totals their heights.
             local box=Instance.new("Frame"); box.Name="Section_"..title
             box.Size=UDim2.new(1,0,0,0); box.AutomaticSize=Enum.AutomaticSize.Y
             box.BackgroundColor3=T.SectionBG; box.LayoutOrder=nextOrd(col)
-            box.ZIndex=Z.Controls; box.Parent=page; corner(box,8); stroke(box,T.Stroke,1)
+            box.ZIndex=Z.Controls; box.Parent=page
+            corner(box,8); stroke(box,T.Stroke,1)
+            -- Stack header, rows, spacer top-to-bottom inside the box
+            local boxLayout=Instance.new("UIListLayout")
+            boxLayout.FillDirection=Enum.FillDirection.Vertical
+            boxLayout.Padding=UDim.new(0,0)
+            boxLayout.SortOrder=Enum.SortOrder.LayoutOrder
+            boxLayout.Parent=box
 
+            -- Header strip (LayoutOrder=1, fixed height)
             local hdr=Instance.new("Frame"); hdr.Name="SectionHeader"
             hdr.Size=UDim2.new(1,0,0,SEC_HDR_H); hdr.BackgroundColor3=T.SectionHdr
-            hdr.BorderSizePixel=0; hdr.ZIndex=Z.Controls+1; hdr.Parent=box
+            hdr.BorderSizePixel=0; hdr.ZIndex=Z.Controls+1; hdr.LayoutOrder=1; hdr.Parent=box
+            -- Only round the top two corners of the header so it blends into the box body
             local hdrC=Instance.new("UICorner"); hdrC.CornerRadius=UDim.new(0,8); hdrC.Parent=hdr
             local dot=Instance.new("Frame"); dot.Size=UDim2.new(0,3,0,14)
             dot.Position=UDim2.new(0,8,0.5,-7); dot.BackgroundColor3=T.Accent
@@ -774,12 +786,23 @@ function ZenithImmortal:CreateWindow(cfg)
                 Enum.Font.GothamBold,Enum.TextXAlignment.Left,Z.Controls+2)
             hl.Size=UDim2.new(1,-24,1,0); hl.Position=UDim2.new(0,18,0,0)
 
+            -- Inner frame holds all control rows, grows with them (LayoutOrder=2)
             local inner=Instance.new("Frame"); inner.Name="Inner"
             inner.Size=UDim2.new(1,0,0,0); inner.AutomaticSize=Enum.AutomaticSize.Y
             inner.BackgroundTransparency=1; inner.ZIndex=Z.Controls
-            inner.Position=UDim2.new(0,0,0,SEC_HDR_H); inner.Parent=box
+            inner.LayoutOrder=2; inner.Parent=box
             local il=Instance.new("UIListLayout"); il.FillDirection=Enum.FillDirection.Vertical
             il.Padding=UDim.new(0,0); il.SortOrder=Enum.SortOrder.LayoutOrder; il.Parent=inner
+
+            -- Bottom spacer (LayoutOrder=3): provides the 6px gap before the
+            -- rounded corners so the last row never bleeds to the box edge.
+            local bottomSpacer=Instance.new("Frame")
+            bottomSpacer.Name="BottomSpacer"
+            bottomSpacer.Size=UDim2.new(1,0,0,6)
+            bottomSpacer.BackgroundTransparency=1
+            bottomSpacer.LayoutOrder=3
+            bottomSpacer.ZIndex=Z.Controls
+            bottomSpacer.Parent=box
 
             currentBox[col]=inner; rowOrd[col]=0
         end
@@ -790,6 +813,8 @@ function ZenithImmortal:CreateWindow(cfg)
             local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,h or ROW_H)
             row.BackgroundColor3=T.Row; row.LayoutOrder=rowOrd[col]
             row.ZIndex=Z.Controls; row.Parent=currentBox[col]
+            -- Divider between rows — hidden on the very last row because the
+            -- bottom spacer sits after it, so visually it's never the last child.
             local div=Instance.new("Frame"); div.Size=UDim2.new(1,0,0,1); div.Position=UDim2.new(0,0,1,-1)
             div.BackgroundColor3=T.Stroke; div.BorderSizePixel=0; div.ZIndex=Z.Controls+1; div.Parent=row
             return row
