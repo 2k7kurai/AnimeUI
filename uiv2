@@ -707,11 +707,23 @@ function ZenithImmortal:CreateWindow(cfg)
             sf.Position=UDim2.new(xScale, xScale>0 and 1 or 0, 0, 0)
             sf.BackgroundTransparency=1; sf.ScrollBarThickness=3
             sf.ScrollBarImageColor3=T.Accent; sf.ScrollBarImageTransparency=0.5
-            sf.CanvasSize=UDim2.new(0,0,0,0); sf.AutomaticCanvasSize=Enum.AutomaticSize.Y
+            -- AutomaticCanvasSize doesn't chain through nested AutomaticSize frames,
+            -- so we drive CanvasSize manually from the layout's AbsoluteContentSize.
+            sf.CanvasSize=UDim2.new(0,0,0,0)
+            sf.AutomaticCanvasSize=Enum.AutomaticSize.None
             sf.ClipsDescendants=true; sf.Visible=false; sf.ZIndex=Z.Controls; sf.Parent=contentArea
             pad(sf,8,8,8,8)
             local ll=Instance.new("UIListLayout"); ll.FillDirection=Enum.FillDirection.Vertical
             ll.Padding=UDim.new(0,6); ll.SortOrder=Enum.SortOrder.LayoutOrder; ll.Parent=sf
+
+            -- Keep CanvasSize in sync whenever layout content changes size
+            local PAD_V = 16  -- top + bottom padding (8+8)
+            local function syncCanvas()
+                sf.CanvasSize=UDim2.new(0,0,0,ll.AbsoluteContentSize.Y + PAD_V)
+            end
+            ll:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas)
+            syncCanvas()
+
             return sf
         end
         local leftCol=makeCol(0); local rightCol=makeCol(0.5)
