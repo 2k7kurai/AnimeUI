@@ -1108,10 +1108,13 @@ function ZenithImmortal:CreateWindow(cfg)
                 nm.Text = n>0 and (c2.Name or "Select Enemies").." ("..n..")" or (c2.Name or "Select Enemies")
             end
 
-            pickerAPI.setup(getNames, selected, function()
-                updateLabel()
-                if c2.OnChange then c2.OnChange(selected) end
-            end)
+            -- Store this picker's own data in upvalues so each picker
+            -- wires itself on open instead of at creation.
+            -- This allows multiple AddEnemyPicker calls without them
+            -- overwriting each other's Selected/GetNames references.
+            local myGetNames = getNames
+            local mySelected  = selected
+            local myOnChange  = c2.OnChange
 
             local btn=Instance.new("TextButton"); btn.Size=UDim2.new(1,0,1,0)
             btn.BackgroundTransparency=1; btn.Text=""; btn.ZIndex=Z.Controls+3; btn.Parent=row
@@ -1122,6 +1125,11 @@ function ZenithImmortal:CreateWindow(cfg)
                 if pickerAPI.isOpen() then
                     pickerAPI.close(); tw(arr,0.12,{Rotation=0})
                 else
+                    -- Wire THIS picker's data right before opening
+                    pickerAPI.setup(myGetNames, mySelected, function()
+                        updateLabel()
+                        if myOnChange then myOnChange(mySelected) end
+                    end)
                     pickerAPI.open(row); tw(arr,0.12,{Rotation=180})
                 end
             end)
