@@ -847,6 +847,94 @@ function ZenithImmortal:CreateWindow(cfg)
             return row
         end
 
+        -- Tooltip helper — adds a ? button to any row
+        -- Call after row + controls are built: addTooltip(row, "text")
+        local tooltipFrame = nil  -- shared tooltip popup for this tab
+
+        local function addTooltip(row, tipText)
+            if not tipText or tipText == "" then return end
+
+            -- Small ? badge on the far right of the row
+            local badge = Instance.new("TextButton")
+            badge.Size             = UDim2.new(0,14,0,14)
+            badge.AnchorPoint      = Vector2.new(1,0.5)
+            badge.Position         = UDim2.new(1,-3,0.5,0)
+            badge.BackgroundColor3 = T.AccentDim
+            badge.Text             = "?"
+            badge.TextColor3       = T.Text
+            badge.Font             = Enum.Font.GothamBold
+            badge.TextSize         = 9
+            badge.AutoButtonColor  = false
+            badge.ZIndex           = Z.Controls+4
+            badge.Parent           = row
+            corner(badge,7)
+
+            -- Tooltip popup frame — parented to gui so it floats above everything
+            local function showTip()
+                if tooltipFrame then tooltipFrame:Destroy() end
+                tooltipFrame = Instance.new("Frame")
+                tooltipFrame.Size             = UDim2.new(0,220,0,0)
+                tooltipFrame.AutomaticSize    = Enum.AutomaticSize.Y
+                tooltipFrame.BackgroundColor3 = T.Panel
+                tooltipFrame.BorderSizePixel  = 0
+                tooltipFrame.ZIndex           = Z.Tooltip+1
+                tooltipFrame.Parent           = gui
+                corner(tooltipFrame,6)
+                local ts = Instance.new("UIStroke")
+                ts.Color = T.Accent; ts.Thickness = 1; ts.Parent = tooltipFrame
+
+                local tipLbl2 = Instance.new("TextLabel")
+                tipLbl2.Size               = UDim2.new(1,-12,0,0)
+                tipLbl2.AutomaticSize      = Enum.AutomaticSize.Y
+                tipLbl2.Position           = UDim2.new(0,6,0,6)
+                tipLbl2.BackgroundTransparency = 1
+                tipLbl2.Text               = tipText
+                tipLbl2.TextColor3         = T.Text
+                tipLbl2.Font               = Enum.Font.Gotham
+                tipLbl2.TextSize           = 11
+                tipLbl2.TextWrapped        = true
+                tipLbl2.TextXAlignment     = Enum.TextXAlignment.Left
+                tipLbl2.ZIndex             = Z.Tooltip+2
+                tipLbl2.Parent             = tooltipFrame
+
+                local pad2 = Instance.new("UIPadding")
+                pad2.PaddingBottom = UDim.new(0,6); pad2.Parent = tooltipFrame
+
+                -- Position near the badge
+                task.defer(function()
+                    if not badge.Parent then return end
+                    local ap  = badge.AbsolutePosition
+                    local as  = badge.AbsoluteSize
+                    local tf  = tooltipFrame.AbsoluteSize
+                    local svp = workspace.CurrentCamera.ViewportSize
+                    local px  = ap.X - 220 - 4
+                    if px < 4 then px = ap.X + as.X + 4 end
+                    local py  = ap.Y + as.Y/2 - 12
+                    if py + tf.Y > svp.Y - 10 then py = svp.Y - tf.Y - 10 end
+                    tooltipFrame.Position = UDim2.new(0, px, 0, py)
+                end)
+            end
+
+            local function hideTip()
+                if tooltipFrame then
+                    tooltipFrame:Destroy()
+                    tooltipFrame = nil
+                end
+            end
+
+            badge.MouseEnter:Connect(function()
+                tw(badge,0.1,{BackgroundColor3=T.Accent})
+                showTip()
+            end)
+            badge.MouseLeave:Connect(function()
+                tw(badge,0.1,{BackgroundColor3=T.AccentDim})
+                hideTip()
+            end)
+            badge.MouseButton1Click:Connect(function()
+                if tooltipFrame then hideTip() else showTip() end
+            end)
+        end
+
         function Tab:AddToggle(c2)
             c2=c2 or {}; local col=c2.Col or "Left"; local state=c2.Default or false
             local row=makeRow(col,ROW_H)
@@ -875,6 +963,7 @@ function ZenithImmortal:CreateWindow(cfg)
             btn.MouseEnter:Connect(function() tw(row,0.1,{BackgroundColor3=T.RowHover}) end)
             btn.MouseLeave:Connect(function() tw(row,0.1,{BackgroundColor3=T.Row}) end)
             refresh(); table.insert(allSectionBoxes,{row=row,nameLbl=nm})
+            addTooltip(row, c2.Tooltip)
             local Tog={}
             function Tog:Set(v) state=v; refresh(); if c2.Callback then c2.Callback(state) end end
             function Tog:Get() return state end
@@ -899,6 +988,7 @@ function ZenithImmortal:CreateWindow(cfg)
                 task.delay(0.1,function() tw(row,0.12,{BackgroundColor3=T.RowHover}) end)
                 if c2.Callback then c2.Callback() end
             end)
+            addTooltip(row, c2.Tooltip)
             table.insert(allSectionBoxes,{row=row,nameLbl=nm})
         end
 
@@ -942,6 +1032,7 @@ function ZenithImmortal:CreateWindow(cfg)
                     end
                 end
             end)
+            addTooltip(row, c2.Tooltip)
             table.insert(allSectionBoxes,{row=row,nameLbl=nm})
             local Sl={}
             function Sl:Set(v)
@@ -1015,6 +1106,7 @@ function ZenithImmortal:CreateWindow(cfg)
                 dp.Position=up and UDim2.new(0,ap.X,0,ap.Y-ph-4) or UDim2.new(0,ap.X,0,ap.Y+as.Y+4)
                 dp.Visible=true; tw(dp,0.15,{Size=UDim2.new(0,pw,0,ph)}); tw(chev,0.15,{Rotation=180})
             end)
+            addTooltip(row, c2.Tooltip)
             table.insert(allSectionBoxes,{row=row,nameLbl=nm})
             local DD={}
             function DD:Set(v) sel=v; selB.Text=v; buildOpts() end
@@ -1077,6 +1169,7 @@ function ZenithImmortal:CreateWindow(cfg)
                     if c2.Callback then c2.Callback(bind) end
                 end
             end)
+            addTooltip(row, c2.Tooltip)
             table.insert(allSectionBoxes,{row=row,nameLbl=nm})
             local KB={}
             function KB:Get() return bind end
