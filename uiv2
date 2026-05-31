@@ -261,7 +261,8 @@ function ZenithImmortal:CreateWindow(cfg)
     -- Drag
     local dragOn,dragInp,dragMP,dragFP = false,nil,nil,nil
     topbar.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 then
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
             dragOn=true; dragMP=i.Position; dragFP=main.Position
             i.Changed:Connect(function()
                 if i.UserInputState==Enum.UserInputState.End then dragOn=false end
@@ -269,13 +270,16 @@ function ZenithImmortal:CreateWindow(cfg)
         end
     end)
     topbar.InputChanged:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseMovement then dragInp=i end
+        if i.UserInputType==Enum.UserInputType.MouseMovement
+        or i.UserInputType==Enum.UserInputType.Touch then dragInp=i end
     end)
     UserInputService.InputChanged:Connect(function(i)
         if i==dragInp and dragOn then
             local d=i.Position-dragMP
-            main.Position=UDim2.new(dragFP.X.Scale,dragFP.X.Offset+d.X,
-                                     dragFP.Y.Scale,dragFP.Y.Offset+d.Y)
+            local vp=workspace.CurrentCamera.ViewportSize
+            local newX=math.clamp(dragFP.X.Offset+d.X, 0, vp.X-main.AbsoluteSize.X)
+            local newY=math.clamp(dragFP.Y.Offset+d.Y, 0, vp.Y-main.AbsoluteSize.Y)
+            main.Position=UDim2.new(0, newX, 0, newY)
         end
     end)
 
@@ -320,6 +324,100 @@ function ZenithImmortal:CreateWindow(cfg)
             hue=(hue+1)%360
             discLbl.TextColor3=Color3.fromHSV(hue/360,0.7,1)
             task.wait(0.04)
+        end
+    end)
+
+    --------------------------------------------------------------------
+    -- RESIZE HANDLE (bottom-right corner)
+    -- A small grippy triangle in the corner. Dragging it resizes the
+    -- window. Min size: 500x340. Clamped to viewport.
+    --------------------------------------------------------------------
+    local MIN_W, MIN_H = 500, 340
+    local resizeHandle = Instance.new("TextButton")
+    resizeHandle.Name              = "ResizeHandle"
+    resizeHandle.Size              = UDim2.new(0, 18, 0, 18)
+    resizeHandle.AnchorPoint       = Vector2.new(1, 1)
+    resizeHandle.Position          = UDim2.new(1, 0, 1, 0)
+    resizeHandle.BackgroundTransparency = 1
+    resizeHandle.Text              = ""
+    resizeHandle.AutoButtonColor   = false
+    resizeHandle.ZIndex            = Z.Footer + 3
+    resizeHandle.Parent            = main
+
+    -- Draw grippy dots as a visual indicator
+    local function makeGripDot(ox, oy)
+        local d = Instance.new("Frame")
+        d.Size             = UDim2.new(0, 2, 0, 2)
+        d.Position         = UDim2.new(1, ox, 1, oy)
+        d.BackgroundColor3 = T.TextMuted
+        d.BorderSizePixel  = 0
+        d.ZIndex           = Z.Footer + 4
+        d.Parent           = main
+        corner(d, 1)
+    end
+    makeGripDot(-4,  -4); makeGripDot(-4,  -9); makeGripDot(-4,  -14)
+    makeGripDot(-9,  -4); makeGripDot(-9,  -9)
+    makeGripDot(-14, -4)
+
+    resizeHandle.MouseEnter:Connect(function()
+        for _, d in ipairs(main:GetChildren()) do
+            if d.Name == "" and d:IsA("Frame") and d.Size == UDim2.new(0,2,0,2) then
+                tw(d, 0.1, {BackgroundColor3 = T.Accent})
+            end
+        end
+    end)
+    resizeHandle.MouseLeave:Connect(function()
+        for _, d in ipairs(main:GetChildren()) do
+            if d.Name == "" and d:IsA("Frame") and d.Size == UDim2.new(0,2,0,2) then
+                tw(d, 0.1, {BackgroundColor3 = T.TextMuted})
+            end
+        end
+    end)
+
+    local resizeDragging  = false
+    local resizeDragStart = nil   -- mouse position at drag start
+    local resizeSizeStart = nil   -- window size at drag start
+
+    local function applyResize(pos)
+        local vp   = workspace.CurrentCamera.ViewportSize
+        local dx   = pos.X - resizeDragStart.X
+        local dy   = pos.Y - resizeDragStart.Y
+        local newW = math.clamp(math.round(resizeSizeStart.X + dx), MIN_W, vp.X - 20)
+        local newH = math.clamp(math.round(resizeSizeStart.Y + dy), MIN_H, vp.Y - 20)
+        main.Size  = UDim2.new(0, newW, 0, newH)
+        local ap   = main.AbsolutePosition
+        main.Position = UDim2.new(0,
+            math.clamp(ap.X, 0, vp.X - newW), 0,
+            math.clamp(ap.Y, 0, vp.Y - newH))
+        origSize = main.Size
+    end
+
+    resizeHandle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            resizeDragging  = true
+            resizeDragStart = i.Position
+            resizeSizeStart = main.AbsoluteSize
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then
+                    resizeDragging = false
+                end
+            end)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(i)
+        if not resizeDragging then return end
+        if i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch then
+            applyResize(i.Position)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            resizeDragging = false
         end
     end)
 
@@ -429,10 +527,8 @@ function ZenithImmortal:CreateWindow(cfg)
         pickerOpen           = true
     end
 
-    -- Outside-click close — wired inside the library.
-    -- task.defer lets row MouseButton1Click fire first before we check
-    -- whether to close, so clicking a bottom row does not dismiss the
-    -- panel before the toggle registers.
+    -- Outside-click close for picker panel.
+    -- task.defer lets row MouseButton1Click fire first before checking.
     UserInputService.InputBegan:Connect(function(input)
         if not pickerOpen then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
@@ -441,12 +537,38 @@ function ZenithImmortal:CreateWindow(cfg)
             if not pickerOpen then return end
             local ap = pickerPanel.AbsolutePosition
             local as = pickerPanel.AbsoluteSize
-            -- Use the scroll canvas height so rows below the visible clip
-            -- boundary still count as "inside" for click detection.
             local scrollH = math.max(as.Y, pickerScroll.AbsoluteCanvasSize.Y)
             local inside = mouse.X >= ap.X and mouse.X <= ap.X + as.X
                         and mouse.Y >= ap.Y and mouse.Y <= ap.Y + scrollH
             if not inside then closePicker() end
+        end)
+    end)
+
+    -- Outside-click close for ALL regular dropdowns.
+    -- activeDropClose holds the closeD fn of whichever dropdown is open.
+    -- task.defer so the dropdown's own click handler fires first.
+    UserInputService.InputBegan:Connect(function(input)
+        if not activeDropClose then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        local mouse = UserInputService:GetMouseLocation()
+        task.defer(function()
+            if not activeDropClose then return end
+            local inside = false
+            for _, dp in ipairs(dropOverlay:GetChildren()) do
+                if dp:IsA("ScrollingFrame") and dp.Visible then
+                    local ap      = dp.AbsolutePosition
+                    local as      = dp.AbsoluteSize
+                    local canvasH = math.max(as.Y, dp.AbsoluteCanvasSize.Y)
+                    if mouse.X >= ap.X and mouse.X <= ap.X + as.X
+                    and mouse.Y >= ap.Y and mouse.Y <= ap.Y + canvasH then
+                        inside = true; break
+                    end
+                end
+            end
+            if not inside then
+                activeDropClose()
+                activeDropClose = nil
+            end
         end)
     end)
 
