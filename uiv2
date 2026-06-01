@@ -1192,7 +1192,7 @@ function ZenithImmortal:CreateWindow(cfg)
             dpL.SortOrder=Enum.SortOrder.LayoutOrder; dpL.Parent=dp
             local function closeD()
                 if not open2 then return end; open2=false
-                if activeDropClose==closeD then activeDropClose=nil end
+                activeDropClose=nil
                 tw(dp,0.12,{Size=UDim2.new(0,dp.AbsoluteSize.X,0,0)})
                 task.delay(0.13,function() dp.Visible=false end); tw(chev,0.12,{Rotation=0})
             end
@@ -1208,11 +1208,13 @@ function ZenithImmortal:CreateWindow(cfg)
                     ob.MouseLeave:Connect(function() tw(ob,0.08,{BackgroundColor3=T.SectionBG,TextColor3=opt==sel and T.Accent or T.Text}) end)
                     ob.MouseButton1Click:Connect(function()
                         if not Window._alive then return end
-                        sel=opt; selB.Text=opt; closeD(); buildOpts()
-                        Window:Notify({Title=c2.Name or "Dropdown",Content="Selected: "..opt,Duration=2})
-                        if c2.Callback then c2.Callback(opt) end
+                        -- task.defer: let InputBegan outside-click fire first,
+                        -- then process the selection so it isn't double-closed
+                        task.defer(function()
+                            sel=opt; selB.Text=opt; closeD(); buildOpts()
+                            if c2.Callback then c2.Callback(opt) end
+                        end)
                     end)
-                end
             end
             buildOpts()
             selB.MouseButton1Click:Connect(function()
