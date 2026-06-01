@@ -1221,9 +1221,18 @@ function ZenithImmortal:CreateWindow(cfg)
                 if activeDropClose and activeDropClose~=closeD then activeDropClose() end
                 open2=true; activeDropClose=closeD
                 local ap=selB.AbsolutePosition; local as=selB.AbsoluteSize
-                local pw=as.X+4; local ph=math.min(#opts*26+8,160)
-                local sh=workspace.CurrentCamera.ViewportSize.Y
-                local up=(sh-(ap.Y+as.Y))<ph+10
+                local pw=as.X+4
+                local sv=workspace.CurrentCamera.ViewportSize.Y
+                local idealH=#opts*26+8
+                local spaceBelow=sv-(ap.Y+as.Y)-10
+                local spaceAbove=ap.Y-10
+                local ph,up
+                if spaceBelow>=math.min(idealH,80) or spaceBelow>=spaceAbove then
+                    ph=math.min(idealH,spaceBelow); up=false
+                else
+                    ph=math.min(idealH,spaceAbove); up=true
+                end
+                ph=math.max(ph,30)
                 dp.Size=UDim2.new(0,pw,0,0); dp.CanvasPosition=Vector2.zero
                 dp.Position=up and UDim2.new(0,ap.X,0,ap.Y-ph-4) or UDim2.new(0,ap.X,0,ap.Y+as.Y+4)
                 dp.Visible=true; tw(dp,0.15,{Size=UDim2.new(0,pw,0,ph)}); tw(chev,0.15,{Rotation=180})
