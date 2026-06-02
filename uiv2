@@ -1236,6 +1236,7 @@ function ZenithImmortal:CreateWindow(cfg)
                     ph=math.min(idealH,spaceAbove); up=true
                 end
                 ph=math.max(ph,30)
+                buildOpts()
                 dp.Size=UDim2.new(0,pw,0,0); dp.CanvasPosition=Vector2.zero
                 dp.Position=up and UDim2.new(0,ap.X,0,ap.Y-ph-4) or UDim2.new(0,ap.X,0,ap.Y+as.Y+4)
                 dp.Visible=true; tw(dp,0.15,{Size=UDim2.new(0,pw,0,ph)}); tw(chev,0.15,{Rotation=180})
