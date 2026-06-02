@@ -1217,6 +1217,7 @@ function ZenithImmortal:CreateWindow(cfg)
                     end)
                 end
             end
+            buildOpts()
             selB.MouseButton1Click:Connect(function()
                 if not Window._alive then return end
                 if open2 then closeD(); return end
