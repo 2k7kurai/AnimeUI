@@ -432,6 +432,8 @@ function ZenithImmortal:CreateWindow(cfg)
     dropOverlay.Parent              = gui
 
     local activeDropClose = nil
+    local dropOpenedAt    = 0   -- timestamp of the last dropdown open; guards against
+                                -- the outside-click handler firing during the open tween
 
     --------------------------------------------------------------------
     -- ENEMY PICKER PANEL
@@ -557,6 +559,11 @@ function ZenithImmortal:CreateWindow(cfg)
         local mouse = UserInputService:GetMouseLocation()
         task.defer(function()
             if not activeDropClose then return end
+            -- Ignore clicks that arrive within 0.25s of opening.
+            -- During this window the open tween is still animating so
+            -- AbsoluteSize hasn't reached its final value yet, which makes
+            -- valid item clicks appear "outside" the panel and close it.
+            if tick() - dropOpenedAt < 0.25 then return end
             local inside = false
             for _, dp in ipairs(dropOverlay:GetChildren()) do
                 if dp:IsA("ScrollingFrame") and dp.Visible then
@@ -1236,6 +1243,7 @@ function ZenithImmortal:CreateWindow(cfg)
                 if open2 then closeD(); return end
                 if activeDropClose and activeDropClose~=closeD then activeDropClose() end
                 open2=true; activeDropClose=closeD
+                dropOpenedAt=tick()  -- stamp when opened so outside-click guard works
 
                 local vp        = workspace.CurrentCamera.ViewportSize
                 local ap        = selB.AbsolutePosition
