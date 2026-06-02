@@ -429,6 +429,7 @@ function ZenithImmortal:CreateWindow(cfg)
     dropOverlay.BackgroundTransparency = 1
     dropOverlay.ZIndex              = Z.Dropdown
     dropOverlay.ClipsDescendants    = false   -- ← CRITICAL: never clip dropdown children
+    dropOverlay.Active              = true    -- ensures clicks are captured when a dropdown is open
     dropOverlay.Parent              = gui
 
     local activeDropClose = nil
@@ -1221,10 +1222,9 @@ function ZenithImmortal:CreateWindow(cfg)
                     ob.MouseLeave:Connect(function() tw(ob,0.08,{BackgroundColor3=T.SectionBG,TextColor3=opt==sel and T.Accent or T.Text}) end)
                     ob.MouseButton1Click:Connect(function()
                         if not Window._alive then return end
-                        task.defer(function()
-                            sel=opt; selB.Text=opt; closeD(); buildOpts()
-                            if c2.Callback then c2.Callback(opt) end
-                        end)
+                        activeDropClose = nil
+                        sel=opt; selB.Text=opt; closeD(); buildOpts()
+                        if c2.Callback then c2.Callback(opt) end
                     end)
                 end
                 syncDpCanvas()
