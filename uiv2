@@ -432,8 +432,6 @@ function ZenithImmortal:CreateWindow(cfg)
     dropOverlay.Parent              = gui
 
     local activeDropClose = nil
-    local dropOpenedAt    = 0   -- timestamp of the last dropdown open; guards against
-                                -- the outside-click handler firing during the open tween
 
     --------------------------------------------------------------------
     -- ENEMY PICKER PANEL
@@ -553,35 +551,30 @@ function ZenithImmortal:CreateWindow(cfg)
     end)
 
     -- Outside-click close for ALL regular dropdowns.
+    -- Uses Roblox's own GUI hit-testing (GetGuiObjectsAtPosition) so the check
+    -- is always pixel-accurate regardless of tween state, canvas size, or window
+    -- position — no manual coordinate math needed.
     UserInputService.InputBegan:Connect(function(input)
         if not activeDropClose then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-        local mouse = UserInputService:GetMouseLocation()
+
         task.defer(function()
             if not activeDropClose then return end
-            -- Ignore clicks that arrive within 0.25s of opening.
-            -- During this window the open tween is still animating so
-            -- AbsoluteSize hasn't reached its final value yet, which makes
-            -- valid item clicks appear "outside" the panel and close it.
-            if tick() - dropOpenedAt < 0.25 then return end
-            local inside = false
-            for _, dp in ipairs(dropOverlay:GetChildren()) do
-                if dp:IsA("ScrollingFrame") and dp.Visible then
-                    local ap      = dp.AbsolutePosition
-                    local as      = dp.AbsoluteSize
-                    -- Use the larger of rendered size vs canvas size so partially
-                    -- scrolled panels are still fully hittable.
-                    local panelH  = math.max(as.Y, dp.AbsoluteCanvasSize.Y)
-                    if mouse.X >= ap.X and mouse.X <= ap.X + as.X
-                    and mouse.Y >= ap.Y and mouse.Y <= ap.Y + panelH then
-                        inside = true; break
-                    end
+            local mouse = UserInputService:GetMouseLocation()
+
+            local guiObjects = PlayerGui:GetGuiObjectsAtPosition(
+                mouse.X,
+                mouse.Y
+            )
+
+            for _, obj in ipairs(guiObjects) do
+                if obj:IsDescendantOf(dropOverlay) then
+                    return  -- click was inside a dropdown panel; do nothing
                 end
             end
-            if not inside then
-                activeDropClose()
-                activeDropClose = nil
-            end
+
+            activeDropClose()
+            activeDropClose = nil
         end)
     end)
 
@@ -1243,7 +1236,6 @@ function ZenithImmortal:CreateWindow(cfg)
                 if open2 then closeD(); return end
                 if activeDropClose and activeDropClose~=closeD then activeDropClose() end
                 open2=true; activeDropClose=closeD
-                dropOpenedAt=tick()  -- stamp when opened so outside-click guard works
 
                 local vp        = workspace.CurrentCamera.ViewportSize
                 local ap        = selB.AbsolutePosition
