@@ -1,38 +1,8 @@
 --[[
-    ZENITH IMMORTAL UI  ·  v3.1
+    ZENITH IMMORTAL UI  ·  v3.1  (Hidden GUI version)
     ─────────────────────────────────────────────────────────────────
-    External library — load with:
-        local ZI = loadstring(game:HttpGet("RAW_URL"))()
-
-    Layout: two independent scroll columns (Left / Right)
-    Each section = self-contained rounded box with title header.
-    Accent: #538AFD
-    ─────────────────────────────────────────────────────────────────
-    API:
-        local Win = ZI:CreateWindow({ Name="Title" })
-        local Tab = Win:CreateTab("Main", ZI.Icons.Home)
-
-        Tab:AddSection("My Section", "Left")        -- opens a box in left col
-        Tab:AddToggle({ Name="X", Flag="x", Col="Left", Default=false, Callback=fn })
-        Tab:AddButton({ Name="X", Col="Left", Callback=fn })
-        Tab:AddDropdown({ Name="X", Col="Left", Options={}, Default="A", Callback=fn })
-        Tab:AddSlider({ Name="X", Col="Left", Min=0, Max=100, Default=50, Callback=fn })
-        Tab:AddInput({ Name="X", Col="Left", Placeholder="...", Callback=fn })
-        Tab:AddKeybind({ Name="X", Col="Left", Default=Enum.KeyCode.F, Callback=fn })
-        Tab:AddLabel("text", "Left")
-
-        -- Multi-select enemy picker (floating checklist, outside-click closes):
-        Tab:AddEnemyPicker({
-            Name     = "Select Enemies",
-            Col      = "Left",
-            Selected = mySelectedTable,   -- { [name]=true } passed by reference
-            GetNames = function() return {"EnemyA","EnemyB"} end,
-            OnChange = function(sel) end, -- optional
-        })
-
-        Win:BuildSettingsUI(tab)
-        Win:Notify({ Title="Hi", Content="msg", Type="success", Duration=3 })
-        Win:Unload()
+    Uses Infinite Yield’s hidden container technique – game cannot hide/destroy the UI.
+    Fallback: syn.protect_gui → CoreGui → PlayerGui
 ]]
 
 local Players          = game:GetService("Players")
@@ -141,7 +111,7 @@ local function saveSettings(d)
 end
 
 ------------------------------------------------------------------------
--- CREATE WINDOW
+-- CREATE WINDOW (with hidden GUI container)
 ------------------------------------------------------------------------
 function ZenithImmortal:CreateWindow(cfg)
     cfg = cfg or {}
@@ -178,12 +148,27 @@ function ZenithImmortal:CreateWindow(cfg)
         saveSettings(persist)
     end
 
-    -- GUI
+    -- ================================================================
+    -- GUI CREATION – HIDDEN CONTAINER (Infinite Yield technique)
+    -- ================================================================
     local gui = Instance.new("ScreenGui")
-    gui.Name="ZenithImmortalUI"; gui.ResetOnSpawn=false
-    gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
-    gui.DisplayOrder=2147483647; gui.IgnoreGuiInset=true
-    gui.OnTopOfCoreBlur=true; gui.Parent=PlayerGui
+    gui.Name = "ZenithImmortalUI"
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = 2147483647
+    gui.IgnoreGuiInset = true
+    gui.OnTopOfCoreBlur = true
+
+    -- Use get_hidden_gui or gethui (like IY), with fallbacks
+    local hiddenContainer = get_hidden_gui or gethui
+    if hiddenContainer then
+        gui.Parent = hiddenContainer()          -- magical protected layer
+    elseif syn and syn.protect_gui then
+        syn.protect_gui(gui)                   -- protect before parenting
+        gui.Parent = game:GetService("CoreGui")
+    else
+        gui.Parent = PlayerGui                 -- last resort
+    end
 
     -- Main frame
     local main = Instance.new("Frame")
@@ -310,7 +295,7 @@ function ZenithImmortal:CreateWindow(cfg)
 
     -- Footer
     local footer = Instance.new("Frame"); footer.Name="Footer"
-    footer.Size=UDim2.new(1,0,0,FOOT_H); footer.Position=UDim2.new(0,0,1,-FOOT_H)
+    footer.Size=UDim2.new(1,0,0,FOOT_H); footer.Position=UDim2.new(0,0,0,1,-FOOT_H)
     footer.BackgroundColor3=T.Footer; footer.BackgroundTransparency=0.06
     footer.ZIndex=Z.Footer; footer.Parent=main; corner(footer,RADIUS)
     local footLine=Instance.new("Frame"); footLine.Size=UDim2.new(1,0,0,1)
@@ -387,7 +372,6 @@ function ZenithImmortal:CreateWindow(cfg)
         main.Position = UDim2.new(0,
             math.clamp(ap.X, 0, vp.X - newW), 0,
             math.clamp(ap.Y, 0, vp.Y - newH))
-        origSize = main.Size
     end
 
     resizeHandle.InputBegan:Connect(function(i)
