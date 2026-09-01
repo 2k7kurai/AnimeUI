@@ -1,7 +1,6 @@
 --[[
 	AuroraUI
-	A standalone, anime-inspired premium UI library for Roblox scripts.
-	Plug-and-play: require/loadstring this module, call AuroraUI:CreateWindow(...)
+	require/loadstring this module, call AuroraUI:CreateWindow(...)
 	then build Tabs -> Sections -> Elements.
 
 	Aesthetic: dark glass panels, neon pink/purple/cyan gradients,
@@ -79,6 +78,47 @@ local Themes = {
 local Aurora = {}
 Aurora.__index = Aurora
 Aurora.Flags = {}
+Aurora.ConfigFolder = "AuroraUI"
+
+-- Built-in icon set (real, hosted Roblox assets). Some are aliased.
+Aurora.Icons = {
+	Home     = "rbxassetid://77315746014944",
+	Shield   = "rbxassetid://137693612553883",
+	Star     = "rbxassetid://105597214004476",
+	World    = "rbxassetid://127205153276359",
+	Eye      = "rbxassetid://133850053895104",
+	Visuals  = "rbxassetid://133850053895104", -- alias of Eye
+	Settings = "rbxassetid://76238017356661",
+	Player   = "rbxassetid://85948463349168",
+	Misc     = "rbxassetid://140409912872767",
+	Folder   = "rbxassetid://105378541481020",
+	Configs  = "rbxassetid://105378541481020", -- alias of Folder
+	Reticle  = "rbxassetid://92732481753916",
+	Combat   = "rbxassetid://92732481753916",  -- alias of Reticle
+}
+
+-- Safe wrappers around executor file functions
+local function safeMakeFolder(path)
+	pcall(function()
+		if not isfolder(path) then
+			makefolder(path)
+		end
+	end)
+end
+local function safeWriteFile(path, content)
+	local ok = pcall(function() writefile(path, content) end)
+	return ok
+end
+local function safeReadFile(path)
+	local ok, res = pcall(function()
+		if isfile(path) then
+			return readfile(path)
+		end
+		return nil
+	end)
+	if ok then return res end
+	return nil
+end
 
 local function New(class, props, children)
 	local inst = Instance.new(class)
@@ -101,7 +141,7 @@ local EASE = TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Ou
 local EASE_SLOW = TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 local EASE_GLOW = TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 
--- Adds a soft animated glow stroke that pulses. Returns the UIStroke.
+-- Pulsing glow stroke
 local function AddGlowStroke(target, color, thickness)
 	local stroke = New("UIStroke", {
 		Color = color,
@@ -114,7 +154,7 @@ local function AddGlowStroke(target, color, thickness)
 	return stroke
 end
 
--- Simulated outer glow using a soft, oversized, low-transparency backdrop image.
+-- Soft radial backdrop glow
 local function AddOuterGlow(target, color, size)
 	local glow = New("ImageLabel", {
 		Name = "OuterGlow",
@@ -171,7 +211,6 @@ local function MakeDraggable(dragHandle, moveTarget)
 	end)
 end
 
--- Generic hover/press feedback for interactive elements.
 local function AddHoverEffect(button, baseColor, hoverColor, stroke)
 	button.MouseEnter:Connect(function()
 		Tween(button, EASE, { BackgroundColor3 = hoverColor })
@@ -189,6 +228,47 @@ local function AddHoverEffect(button, baseColor, hoverColor, stroke)
 	end)
 end
 
+-- Drifting sakura petals
+local function StartPetals(parent, T, count)
+	count = count or 14
+	local holder = New("Frame", {
+		Name = "Petals",
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		ClipsDescendants = true,
+		ZIndex = 0,
+		Parent = parent,
+	})
+	for i = 1, count do
+		task.spawn(function()
+			task.wait(math.random() * 4)
+			while holder.Parent do
+				local petal = New("Frame", {
+					BackgroundColor3 = (i % 2 == 0) and T.Accent1 or T.Accent2,
+					BackgroundTransparency = 0.25,
+					Size = UDim2.new(0, math.random(4, 7), 0, math.random(4, 7)),
+					Position = UDim2.new(math.random(), 0, 0, -10),
+					Rotation = math.random(0, 360),
+					ZIndex = 0,
+					Parent = holder,
+				})
+				AddCorner(petal, 4)
+				local duration = math.random(7, 13)
+				local endX = math.clamp(petal.Position.X.Scale + (math.random(-15, 15) / 100), -0.05, 1.05)
+				Tween(petal, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+					Position = UDim2.new(endX, 0, 1, 10),
+					Rotation = petal.Rotation + math.random(180, 420),
+				})
+				Tween(petal, TweenInfo.new(duration * 0.85, Enum.EasingStyle.Linear), { BackgroundTransparency = 1 })
+				task.wait(duration)
+				petal:Destroy()
+				task.wait(math.random() * 2)
+			end
+		end)
+	end
+	return holder
+end
+
 --=========================================================
 -- WINDOW
 --=========================================================
@@ -197,7 +277,6 @@ function Aurora:CreateWindow(config)
 	local themeName = config.Theme or "Sakura"
 	local T = Themes[themeName] or Themes.Sakura
 
-	-- Destroy any previous instance so re-running the script doesn't stack UIs
 	local existing = PlayerGui:FindFirstChild("AuroraUI")
 	if existing then existing:Destroy() end
 
@@ -221,11 +300,14 @@ function Aurora:CreateWindow(config)
 	New("UIStroke", { Color = T.Stroke, Thickness = 1, Transparency = 0.3 }).Parent = Main
 	AddOuterGlow(Main, T.Accent2, 60)
 
-	-- subtle diagonal gradient overlay on the whole window for depth
 	local bgGrad = AddGradient(Main, ColorSequence.new({
 		ColorSequenceKeypoint.new(0, T.Background),
 		ColorSequenceKeypoint.new(1, T.Panel),
 	}), 60)
+
+	if config.Particles ~= false then
+		StartPetals(Main, T, config.ParticleCount or 14)
+	end
 
 	-- TOP BAR
 	local TopBar = New("Frame", {
@@ -236,7 +318,7 @@ function Aurora:CreateWindow(config)
 		Parent = Main,
 	})
 	AddCorner(TopBar, 14)
-	-- mask the bottom corners of the topbar so it looks flush, not pill-shaped
+	-- mask topbar's bottom corners so it's flush, not pill-shaped
 	New("Frame", {
 		Size = UDim2.new(1, 0, 0, 14),
 		Position = UDim2.new(0, 0, 1, -14),
@@ -310,38 +392,110 @@ function Aurora:CreateWindow(config)
 
 	MakeDraggable(TopBar, Main)
 
-	-- SIDEBAR (tabs)
+	-- POWER LEVEL badge (cosmetic)
+	local PowerBadge = New("Frame", {
+		Name = "PowerBadge",
+		BackgroundColor3 = T.Panel,
+		Size = UDim2.new(0, 82, 0, 22),
+		Position = UDim2.new(1, -172, 0.5, -11),
+		Parent = TopBar,
+	})
+	AddCorner(PowerBadge, 6)
+	AddGlowStroke(PowerBadge, T.Accent3, 1)
+	local PowerLabel = New("TextLabel", {
+		Text = "PWR 0",
+		Font = Enum.Font.GothamBold,
+		TextSize = 11,
+		TextColor3 = T.Accent3,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		Parent = PowerBadge,
+	})
+	if config.PowerLevelBadge ~= false then
+		local pwrTarget = config.PowerLevel or math.random(1000, 9999)
+		task.spawn(function()
+			local shown = 0
+			while PowerBadge.Parent do
+				local jitterTarget = pwrTarget + math.random(-25, 25)
+				for _ = 1, 6 do
+					shown = math.floor(shown + (jitterTarget - shown) * 0.4)
+					PowerLabel.Text = "PWR " .. tostring(shown)
+					task.wait(0.05)
+				end
+				task.wait(math.random(2, 5))
+			end
+		end)
+	else
+		PowerBadge.Visible = false
+	end
+
+	-- SIDEBAR (icon rail)
+	local SIDEBAR_WIDTH = 64
 	local Sidebar = New("Frame", {
 		Name = "Sidebar",
-		Size = UDim2.new(0, 140, 1, -50),
+		Size = UDim2.new(0, SIDEBAR_WIDTH, 1, -50),
 		Position = UDim2.new(0, 0, 0, 50),
 		BackgroundColor3 = T.Panel,
 		BackgroundTransparency = 0.2,
 		BorderSizePixel = 0,
 		Parent = Main,
 	})
+	AddCorner(Sidebar, 14)
+	-- only the bottom-left corner sits on Main's actual rounded edge; patch
+	-- the other three back to square (they're internal seams)
+	local function SquareOffCorner(parent, position)
+		New("Frame", {
+			BackgroundColor3 = T.Panel,
+			BackgroundTransparency = 0.2,
+			BorderSizePixel = 0,
+			Size = UDim2.new(0, 16, 0, 16),
+			Position = position,
+			Parent = parent,
+		})
+	end
+	SquareOffCorner(Sidebar, UDim2.new(0, 0, 0, 0))      -- top-left
+	SquareOffCorner(Sidebar, UDim2.new(1, -16, 0, 0))    -- top-right
+	SquareOffCorner(Sidebar, UDim2.new(1, -16, 1, -16))  -- bottom-right
+
 	local TabList = New("UIListLayout", {
-		Padding = UDim.new(0, 6),
+		Padding = UDim.new(0, 8),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	})
 	TabList.Parent = Sidebar
 	New("UIPadding", {
 		PaddingTop = UDim.new(0, 12),
-		PaddingLeft = UDim.new(0, 10),
-		PaddingRight = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
 	}).Parent = Sidebar
 
-	-- CONTENT AREA
 	local Content = New("Frame", {
 		Name = "Content",
-		Size = UDim2.new(1, -140, 1, -50),
-		Position = UDim2.new(0, 140, 0, 50),
+		Size = UDim2.new(1, -SIDEBAR_WIDTH, 1, -50),
+		Position = UDim2.new(0, SIDEBAR_WIDTH, 0, 50),
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 		Parent = Main,
 	})
 
-	-- NOTIFICATIONS holder (top-right of screen, independent of Main)
+	-- shared tooltip, reused by every tab button
+	local Tooltip = New("TextLabel", {
+		Name = "Tooltip",
+		Text = "",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 12,
+		TextColor3 = T.Text,
+		BackgroundColor3 = T.PanelLight,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.new(0, 0, 0, 26),
+		Visible = false,
+		ZIndex = 100,
+		Parent = ScreenGui,
+	})
+	AddCorner(Tooltip, 6)
+	New("UIStroke", { Color = T.Accent1, Thickness = 1, Transparency = 0.4 }).Parent = Tooltip
+	New("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }).Parent = Tooltip
+
 	local NotifHolder = New("Frame", {
 		Name = "Notifications",
 		Size = UDim2.new(0, 300, 1, -20),
@@ -361,14 +515,120 @@ function Aurora:CreateWindow(config)
 	Window.Theme = T
 	Window.Tabs = {}
 	Window._firstTab = nil
+	Window._flagObjects = {}   -- flagName -> { Get = fn, Set = fn }
+	Window._keybinds = {}      -- list of { Name, KeyName } for the keybind list panel
+	Window.ConfigName = config.ConfigName or "default"
+	Window.ToggleKey = config.ToggleKey or Enum.KeyCode.RightShift
 
-	-- toggle UI visibility with Right Shift by default
+	-- toggle UI visibility with the configured hotkey
 	UserInputService.InputBegan:Connect(function(input, gpe)
 		if gpe then return end
-		if input.KeyCode == (config.ToggleKey or Enum.KeyCode.RightShift) then
+		if input.KeyCode == Window.ToggleKey then
 			Main.Visible = not Main.Visible
 		end
 	end)
+
+	--=====================================================
+	-- CONFIG SAVE / LOAD (persists Flag'd elements to JSON)
+	--=====================================================
+	function Window:SaveConfig(name)
+		name = name or Window.ConfigName
+		safeMakeFolder(Aurora.ConfigFolder)
+		local data = {}
+		for flag, obj in pairs(Window._flagObjects) do
+			local ok, val = pcall(obj.Get)
+			if ok then data[flag] = val end
+		end
+		local ok = safeWriteFile(
+			Aurora.ConfigFolder .. "/" .. name .. ".json",
+			game:GetService("HttpService"):JSONEncode(data)
+		)
+		if ok then
+			Window:Notify({ Title = "Config Saved", Content = "Saved as \"" .. name .. "\"", Duration = 3 })
+		else
+			Window:Notify({ Title = "Save Failed", Content = "Your executor doesn't support file I/O.", Duration = 4 })
+		end
+		return ok
+	end
+
+	function Window:LoadConfig(name)
+		name = name or Window.ConfigName
+		local raw = safeReadFile(Aurora.ConfigFolder .. "/" .. name .. ".json")
+		if not raw then
+			Window:Notify({ Title = "No Config Found", Content = "\"" .. name .. "\" doesn't exist yet.", Duration = 3 })
+			return false
+		end
+		local ok, data = pcall(function()
+			return game:GetService("HttpService"):JSONDecode(raw)
+		end)
+		if not ok then return false end
+		for flag, value in pairs(data) do
+			local obj = Window._flagObjects[flag]
+			if obj then pcall(obj.Set, value) end
+		end
+		Window:Notify({ Title = "Config Loaded", Content = "Loaded \"" .. name .. "\"", Duration = 3 })
+		return true
+	end
+
+	--=====================================================
+	-- POWER LEVEL SCAN (dramatic count-up overlay)
+	--=====================================================
+	function Window:PowerLevelScan(opts)
+		opts = opts or {}
+		local target = opts.Target or math.random(5000, 99999)
+
+		local overlay = New("Frame", {
+			BackgroundColor3 = T.Background,
+			BackgroundTransparency = 0.1,
+			Size = UDim2.new(1, 0, 1, 0),
+			ZIndex = 50,
+			Parent = Main,
+		})
+		AddCorner(overlay, 14)
+
+		local numberLabel = New("TextLabel", {
+			Text = "0",
+			Font = Enum.Font.GothamBlack,
+			TextSize = 44,
+			TextColor3 = T.Accent1,
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, 60),
+			Position = UDim2.new(0, 0, 0.4, -30),
+			ZIndex = 51,
+			Parent = overlay,
+		})
+		local caption = New("TextLabel", {
+			Text = opts.Title or "SCANNING POWER LEVEL...",
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextColor3 = T.SubText,
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, 20),
+			Position = UDim2.new(0, 0, 0.4, 34),
+			ZIndex = 51,
+			Parent = overlay,
+		})
+
+		task.spawn(function()
+			local steps = 28
+			for i = 1, steps do
+				local shown = math.floor((target / steps) * i)
+				numberLabel.Text = tostring(shown)
+				numberLabel.Position = UDim2.new(0, math.random(-3, 3), 0.4, -30 + math.random(-2, 2))
+				task.wait(0.035 + (i / steps) * 0.03) -- eases out, like it's "locking on"
+			end
+			numberLabel.Text = "IT'S OVER " .. tostring(target) .. "!!"
+			numberLabel.Position = UDim2.new(0, 0, 0.4, -30)
+			Tween(numberLabel, EASE, { TextColor3 = T.Accent2 })
+			task.wait(1.2)
+			Tween(overlay, EASE_SLOW, { BackgroundTransparency = 1 })
+			Tween(numberLabel, EASE_SLOW, { TextTransparency = 1 })
+			Tween(caption, EASE_SLOW, { TextTransparency = 1 })
+			task.wait(0.45)
+			overlay:Destroy()
+			if opts.Callback then opts.Callback(target) end
+		end)
+	end
 
 	function Window:Notify(opts)
 		opts = opts or {}
@@ -430,34 +690,56 @@ function Aurora:CreateWindow(config)
 			Text = "",
 			AutoButtonColor = false,
 			BackgroundColor3 = isFirst and T.PanelLight or T.Panel,
-			Size = UDim2.new(1, 0, 0, 34),
+			Size = UDim2.new(0, 40, 0, 40),
 			Parent = Sidebar,
 		})
-		AddCorner(TabBtn, 8)
+		AddCorner(TabBtn, 10)
 		local tabStroke = New("UIStroke", { Color = T.Accent2, Thickness = 1, Transparency = isFirst and 0.4 or 1 })
 		tabStroke.Parent = TabBtn
 
-		if icon then
-			New("ImageLabel", {
+		-- fall back to the tab name's first letter if no icon given
+		local iconObj
+		if icon and icon ~= "" then
+			iconObj = New("ImageLabel", {
 				Image = icon,
-				ImageColor3 = T.Text,
+				ImageColor3 = isFirst and T.Text or T.SubText,
 				BackgroundTransparency = 1,
-				Size = UDim2.new(0, 16, 0, 16),
-				Position = UDim2.new(0, 8, 0.5, -8),
+				Size = UDim2.new(0, 20, 0, 20),
+				Position = UDim2.new(0.5, -10, 0.5, -10),
+				Parent = TabBtn,
+			})
+		else
+			iconObj = New("TextLabel", {
+				Text = string.sub(name or "?", 1, 1):upper(),
+				Font = Enum.Font.GothamBold,
+				TextSize = 16,
+				TextColor3 = isFirst and T.Text or T.SubText,
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 1, 0),
 				Parent = TabBtn,
 			})
 		end
-		local label = New("TextLabel", {
-			Text = name,
-			Font = Enum.Font.GothamMedium,
-			TextSize = 13,
-			TextColor3 = isFirst and T.Text or T.SubText,
-			BackgroundTransparency = 1,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Size = UDim2.new(1, -(icon and 32 or 14), 1, 0),
-			Position = UDim2.new(0, icon and 30 or 12, 0, 0),
-			Parent = TabBtn,
-		})
+
+		local function TintIcon(obj, color)
+			if obj:IsA("ImageLabel") then
+				Tween(obj, EASE, { ImageColor3 = color })
+			else
+				Tween(obj, EASE, { TextColor3 = color })
+			end
+		end
+
+		TabBtn.MouseEnter:Connect(function()
+			Tooltip.Text = name
+			Tooltip.Visible = true
+			local pos = TabBtn.AbsolutePosition
+			Tooltip.Position = UDim2.new(
+				0, pos.X + TabBtn.AbsoluteSize.X + 10,
+				0, pos.Y + TabBtn.AbsoluteSize.Y / 2 - 13
+			)
+		end)
+		TabBtn.MouseLeave:Connect(function()
+			Tooltip.Visible = false
+		end)
 
 		local Page = New("ScrollingFrame", {
 			Size = UDim2.new(1, -20, 1, -16),
@@ -476,18 +758,18 @@ function Aurora:CreateWindow(config)
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}).Parent = Page
 
-		local Tab = { Button = TabBtn, Page = Page }
+		local Tab = { Button = TabBtn, Page = Page, Icon = iconObj }
 
 		TabBtn.MouseButton1Click:Connect(function()
 			for _, t in pairs(Window.Tabs) do
 				Tween(t.Button, EASE, { BackgroundColor3 = T.Panel })
 				Tween(t.Stroke, EASE, { Transparency = 1 })
-				Tween(t.Label, EASE, { TextColor3 = T.SubText })
+				TintIcon(t.Icon, T.SubText)
 				t.Page.Visible = false
 			end
 			Tween(TabBtn, EASE, { BackgroundColor3 = T.PanelLight })
 			Tween(tabStroke, EASE, { Transparency = 0.4 })
-			Tween(label, EASE, { TextColor3 = T.Text })
+			TintIcon(iconObj, T.Text)
 			Page.Visible = true
 		end)
 
@@ -503,7 +785,6 @@ function Aurora:CreateWindow(config)
 		end)
 
 		Tab.Stroke = tabStroke
-		Tab.Label = label
 		Window.Tabs[#Window.Tabs + 1] = Tab
 
 		--=================================================
@@ -550,14 +831,28 @@ function Aurora:CreateWindow(config)
 			AddCorner(Btn, 8)
 			local stroke = New("UIStroke", { Color = T.Accent1, Thickness = 1, Transparency = 0.6 })
 			stroke.Parent = Btn
+
+			local textOffset = 12
+			if opts.Icon then
+				New("ImageLabel", {
+					Image = opts.Icon,
+					ImageColor3 = T.Accent1,
+					BackgroundTransparency = 1,
+					Size = UDim2.new(0, 18, 0, 18),
+					Position = UDim2.new(0, 12, 0.5, -9),
+					Parent = Btn,
+				})
+				textOffset = 38
+			end
+
 			New("TextLabel", {
 				Text = opts.Name or "Button",
 				Font = Enum.Font.GothamMedium,
 				TextSize = 13,
 				TextColor3 = T.Text,
 				BackgroundTransparency = 1,
-				Size = UDim2.new(1, -16, 1, 0),
-				Position = UDim2.new(0, 12, 0, 0),
+				Size = UDim2.new(1, -(textOffset + 4), 1, 0),
+				Position = UDim2.new(0, textOffset, 0, 0),
 				TextXAlignment = Enum.TextXAlignment.Left,
 				Parent = Btn,
 			})
@@ -578,14 +873,28 @@ function Aurora:CreateWindow(config)
 			})
 			AddCorner(Row, 8)
 			New("UIStroke", { Color = T.Stroke, Thickness = 1, Transparency = 0.6 }).Parent = Row
+
+			local labelOffset = 12
+			if opts.Icon then
+				New("ImageLabel", {
+					Image = opts.Icon,
+					ImageColor3 = T.Accent1,
+					BackgroundTransparency = 1,
+					Size = UDim2.new(0, 16, 0, 16),
+					Position = UDim2.new(0, 12, 0.5, -8),
+					Parent = Row,
+				})
+				labelOffset = 36
+			end
+
 			New("TextLabel", {
 				Text = opts.Name or "Toggle",
 				Font = Enum.Font.GothamMedium,
 				TextSize = 13,
 				TextColor3 = T.Text,
 				BackgroundTransparency = 1,
-				Size = UDim2.new(1, -60, 1, 0),
-				Position = UDim2.new(0, 12, 0, 0),
+				Size = UDim2.new(1, -(labelOffset + 48), 1, 0),
+				Position = UDim2.new(0, labelOffset, 0, 0),
 				TextXAlignment = Enum.TextXAlignment.Left,
 				Parent = Row,
 			})
@@ -621,8 +930,17 @@ function Aurora:CreateWindow(config)
 				render()
 				if opts.Callback then opts.Callback(state) end
 			end)
-			if opts.Flag then Aurora.Flags[opts.Flag] = state end
-			return { Set = function(_, v) state = v; render(); if opts.Callback then opts.Callback(state) end end }
+
+			local function setState(v)
+				state = v
+				render()
+				if opts.Callback then opts.Callback(state) end
+			end
+			if opts.Flag then
+				Aurora.Flags[opts.Flag] = state
+				Window._flagObjects[opts.Flag] = { Get = function() return state end, Set = setState }
+			end
+			return { Set = function(_, v) setState(v) end }
 		end
 
 		function Elements:CreateSlider(opts)
@@ -702,7 +1020,17 @@ function Aurora:CreateWindow(config)
 					dragging = false
 				end
 			end)
-			return { Set = function(_, v) value = math.clamp(v, min, max); setFromX(Track.AbsolutePosition.X + (value-min)/(max-min)*Track.AbsoluteSize.X) end }
+
+			local function setValue(v)
+				value = math.clamp(v, min, max)
+				local rel = (value - min) / (max - min)
+				Fill.Size = UDim2.new(rel, 0, 1, 0)
+				ValueLabel.Text = tostring(value)
+			end
+			if opts.Flag then
+				Window._flagObjects[opts.Flag] = { Get = function() return value end, Set = setValue }
+			end
+			return { Set = function(_, v) setValue(v) end }
 		end
 
 		function Elements:CreateDropdown(opts)
@@ -793,7 +1121,15 @@ function Aurora:CreateWindow(config)
 				Tween(rowStroke, EASE, { Transparency = open and 0.2 or 0.6 })
 				OptionHolder.Size = UDim2.new(1, 0, 0, #options * 30)
 			end)
-			return { Set = function(_, v) selected = v; SelectedLabel.Text = tostring(v) end }
+
+			local function setSelected(v)
+				selected = v
+				SelectedLabel.Text = tostring(v)
+			end
+			if opts.Flag then
+				Window._flagObjects[opts.Flag] = { Get = function() return selected end, Set = setSelected }
+			end
+			return { Set = function(_, v) setSelected(v) end }
 		end
 
 		function Elements:CreateInput(opts)
@@ -837,10 +1173,140 @@ function Aurora:CreateWindow(config)
 				Tween(stroke, EASE, { Transparency = 0.6, Color = T.Stroke })
 				if opts.Callback then opts.Callback(Box.Text, enter) end
 			end)
+			if opts.Flag then
+				Window._flagObjects[opts.Flag] = {
+					Get = function() return Box.Text end,
+					Set = function(v) Box.Text = tostring(v) end,
+				}
+			end
 			return Box
 		end
 
+		function Elements:CreateKeybind(opts)
+			opts = opts or {}
+			local currentKey = opts.Default or Enum.KeyCode.Unknown
+			local listening = false
+
+			local Row = New("Frame", {
+				BackgroundColor3 = T.PanelLight,
+				Size = UDim2.new(1, 0, 0, 36),
+				Parent = Page,
+			})
+			AddCorner(Row, 8)
+			New("UIStroke", { Color = T.Stroke, Thickness = 1, Transparency = 0.6 }).Parent = Row
+
+			local labelOffset = 12
+			if opts.Icon then
+				New("ImageLabel", {
+					Image = opts.Icon,
+					ImageColor3 = T.Accent1,
+					BackgroundTransparency = 1,
+					Size = UDim2.new(0, 16, 0, 16),
+					Position = UDim2.new(0, 12, 0.5, -8),
+					Parent = Row,
+				})
+				labelOffset = 36
+			end
+
+			New("TextLabel", {
+				Text = opts.Name or "Keybind",
+				Font = Enum.Font.GothamMedium,
+				TextSize = 13,
+				TextColor3 = T.Text,
+				BackgroundTransparency = 1,
+				Size = UDim2.new(0.6, -labelOffset, 1, 0),
+				Position = UDim2.new(0, labelOffset, 0, 0),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = Row,
+			})
+
+			local KeyBtn = New("TextButton", {
+				Text = currentKey.Name,
+				AutoButtonColor = false,
+				Font = Enum.Font.GothamBold,
+				TextSize = 12,
+				TextColor3 = T.Accent1,
+				BackgroundColor3 = T.Panel,
+				Size = UDim2.new(0, 90, 0, 24),
+				Position = UDim2.new(1, -100, 0.5, -12),
+				Parent = Row,
+			})
+			AddCorner(KeyBtn, 6)
+			local keyStroke = New("UIStroke", { Color = T.Accent1, Thickness = 1, Transparency = 0.6 })
+			keyStroke.Parent = KeyBtn
+
+			KeyBtn.MouseButton1Click:Connect(function()
+				listening = true
+				KeyBtn.Text = "..."
+				Tween(keyStroke, EASE, { Transparency = 0.1 })
+			end)
+
+			UserInputService.InputBegan:Connect(function(input, gpe)
+				if listening and input.UserInputType == Enum.UserInputType.Keyboard then
+					currentKey = input.KeyCode
+					KeyBtn.Text = currentKey.Name
+					listening = false
+					Tween(keyStroke, EASE, { Transparency = 0.6 })
+				elseif not listening and not gpe and input.KeyCode == currentKey and currentKey ~= Enum.KeyCode.Unknown then
+					if opts.Callback then opts.Callback() end
+				end
+			end)
+
+			local function setKey(kc)
+				if typeof(kc) == "string" then kc = Enum.KeyCode[kc] end
+				if not kc then return end
+				currentKey = kc
+				KeyBtn.Text = kc.Name
+			end
+
+			if opts.Flag then
+				Window._flagObjects[opts.Flag] = {
+					Get = function() return currentKey.Name end,
+					Set = setKey,
+				}
+			end
+
+			table.insert(Window._keybinds, { Name = opts.Name or "Keybind", Get = function() return currentKey.Name end })
+
+			return { Set = function(_, kc) setKey(kc) end }
+		end
+
 		return Elements
+	end
+
+	-- Name field + Save/Load buttons wired to Window:SaveConfig/LoadConfig
+	function Window:CreateConfigSection(tab)
+		tab:CreateSection("Configuration")
+		local nameBox = tab:CreateInput({
+			Name = "Config Name",
+			Placeholder = Window.ConfigName,
+		})
+		nameBox.Text = Window.ConfigName
+
+		local function resolveName()
+			return (nameBox.Text ~= "" and nameBox.Text) or Window.ConfigName
+		end
+
+		tab:CreateButton({
+			Name = "Save Config",
+			Callback = function() Window:SaveConfig(resolveName()) end,
+		})
+		tab:CreateButton({
+			Name = "Load Config",
+			Callback = function() Window:LoadConfig(resolveName()) end,
+		})
+	end
+
+	-- Read-only list of every keybind registered via CreateKeybind
+	function Window:CreateKeybindList(tab)
+		tab:CreateSection("Keybinds")
+		if #Window._keybinds == 0 then
+			tab:CreateLabel("No keybinds registered yet.")
+			return
+		end
+		for _, kb in ipairs(Window._keybinds) do
+			tab:CreateLabel(kb.Name .. "  →  " .. kb.Get())
+		end
 	end
 
 	return Window
